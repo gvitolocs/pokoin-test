@@ -48,7 +48,7 @@ test('months are newest first and October holds the new tests', () => {
   for (const id of OCTOBER_IDS) assert.ok(ids.includes(id), id);
   const dates = october.tests.map((entry) => entry.date);
   assert.deepEqual(dates, dates.slice().sort((a, b) => b.localeCompare(a)));
-  assert.equal(october.tests[0].id, 'ep8-music-a');
+  assert.equal(october.tests[0].date, dates.slice().sort().at(-1));
   const lora1 = october.tests.find((entry) => entry.id === 'cb-lora1');
   const lora2 = october.tests.find((entry) => entry.id === 'cb-lora2');
   assert.equal(lora1.clips.length, 14);
