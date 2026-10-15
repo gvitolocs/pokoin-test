@@ -1,3 +1,5 @@
+import { MEDIA_BASE } from '../lib/media.js';
+
 /**
  * Every Poko review on /poko, newest first.
  *
@@ -9,12 +11,12 @@
  * and 11 Oct (round 2).
  */
 
-const POSTER = 'https://cdn.pokoin.com/poko-video/ep5/poster.jpg';
-const AUDIO_BASE = 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/auditions-v2-20261008';
-const EP7_AUDIO_BASE = 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/en-ep7-v4-20261008';
-const V5_AUDIO = 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/en-all-v5-20261008';
-const CB1 = 'https://cdn.pokoin.com/poko-video/audio-tests/cb-lora1';
-const CB2 = 'https://cdn.pokoin.com/poko-video/audio-tests/cb-lora2';
+const POSTER = `${MEDIA_BASE}/poko-video/ep5/poster.jpg`;
+const AUDIO_BASE = `${MEDIA_BASE}/poko-video/ep5/chatterbox/auditions-v2-20261008`;
+const EP7_AUDIO_BASE = `${MEDIA_BASE}/poko-video/ep5/chatterbox/en-ep7-v4-20261008`;
+const V5_AUDIO = `${MEDIA_BASE}/poko-video/ep5/chatterbox/en-all-v5-20261008`;
+const CB1 = `${MEDIA_BASE}/poko-video/audio-tests/cb-lora1`;
+const CB2 = `${MEDIA_BASE}/poko-video/audio-tests/cb-lora2`;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -68,15 +70,15 @@ export const POKO_TESTS = [
     id: 'ep8-voxkit-opening',
     date: '2026-10-15',
     title: 'Part 8 · opening · voxel Lugia from the real game model (Rust voxkit) · review',
-    src: 'https://cdn.pokoin.com/poko-video/ep8/voxkit-opening-20261015/lugia-voxkit-opening-720p.mp4',
-    poster: 'https://cdn.pokoin.com/poko-video/ep8/voxkit-opening-20261015/lugia-voxkit-opening.jpg',
+    src: `${MEDIA_BASE}/poko-video/ep8/voxkit-opening-20261015/lugia-voxkit-opening-720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/voxkit-opening-20261015/lugia-voxkit-opening.jpg`,
   }),
   video({
     id: 'ep8-lugia',
     date: '2026-10-14',
     title: 'Part 8 · Lugia: the card that never gives up · full episode · English · Qwen3-TTS v3',
-    src: 'https://cdn.pokoin.com/poko-video/ep8/lugia-v1-20261014/poko_lugia_never_gives_up_720p.mp4',
-    poster: 'https://cdn.pokoin.com/poko-video/ep8/lugia-v1-20261014/ep8.jpg',
+    src: `${MEDIA_BASE}/poko-video/ep8/lugia-v1-20261014/poko_lugia_never_gives_up_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/lugia-v1-20261014/ep8.jpg`,
     note: 'one vertical dive from the sand (2000) to the sunrise (2026): Elemental Blast 90 → 200 → 250. Lugia = voxel art built from the game sprites (pixel art first, no pixel redrawn). All cards real scans. 5:15, final Whisper check 99.3 %.',
   }),
   audio({
@@ -108,16 +110,16 @@ export const POKO_TESTS = [
     id: 'ep7-v2',
     date: '2026-10-10',
     title: 'Part 7 v2 · The Mystery of the Wobbly Cards (Komiya) · full episode · English · Qwen3-TTS v3',
-    src: 'https://cdn.pokoin.com/poko-video/ep7/mystery-v2d-20261010/poko_komiya_museum_720p.mp4',
-    poster: 'https://cdn.pokoin.com/poko-video/ep7/mystery-v2d-20261010/ep7.jpg',
+    src: `${MEDIA_BASE}/poko-video/ep7/mystery-v2d-20261010/poko_komiya_museum_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep7/mystery-v2d-20261010/ep7.jpg`,
     note: 'new script from the Komiya interview + fan discussions; all cards from the Pokoin database (67-card Komiya wall). Voice: Qwen3-TTS v3, one take per clue, pauses written into the text, 15 % slower with WSOLA (your pick D, no tunnel sound); pixel-art detective hat that moves with Poko. 4:19, final Whisper check 97.8 %.',
   }),
   video({
     id: 'ep7-rooms',
     date: '2026-10-10',
     title: 'Previous version · Part 7 · Komiya Museum (rooms) · Qwen3-TTS v3',
-    src: 'https://cdn.pokoin.com/poko-video/ep7/qwen-v3-rooms-20261010/poko_komiya_museum_720p.mp4',
-    poster: 'https://cdn.pokoin.com/poko-video/ep7/qwen-v3-rooms-20261010/ep7.jpg',
+    src: `${MEDIA_BASE}/poko-video/ep7/qwen-v3-rooms-20261010/poko_komiya_museum_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep7/qwen-v3-rooms-20261010/ep7.jpg`,
     note: 'voice: Qwen3-TTS 1.7B v3 fixed, one plain take per museum room (Qwen picks its own rhythm and pauses), no inserted silence; animation and music re-timed to the read. 3:46, final Whisper large-v3 check 98.5 % word match.',
   }),
   audio({
@@ -169,7 +171,7 @@ export const POKO_TESTS = [
       chips: [`clear lines ${words}`, `similarity ${sim} · Fenrir ${teacher}`],
       sub: 'unseen test lines, read as one block · one Poko voice trained on 6 languages',
       aria: `Qwen3-TTS v4 multilingual · ${name}`,
-      src: `https://cdn.pokoin.com/poko-video/qwen-v4-ml-20261010/qwen_v4_${code}.mp3`,
+      src: `${MEDIA_BASE}/poko-video/qwen-v4-ml-20261010/qwen_v4_${code}.mp3`,
     })),
   }),
   audio({
@@ -184,7 +186,7 @@ export const POKO_TESTS = [
         chips: ['word match 100/100/95 %', 'similarity 0.932'],
         sub: 'v3 continued for 10 more epochs · same fixed training',
         aria: 'Qwen3-TTS v3 continued to 20 epochs · same phrases',
-        src: 'https://cdn.pokoin.com/poko-video/ep5/qwen/en-v3b-20ep-20261009/en_qwen_samephrase_v3b.mp3',
+        src: `${MEDIA_BASE}/poko-video/ep5/qwen/en-v3b-20ep-20261009/en_qwen_samephrase_v3b.mp3`,
       },
       {
         id: 'qwen-v3fixed',
@@ -192,7 +194,7 @@ export const POKO_TESTS = [
         chips: ['word match 100/100/95 %', 'similarity 0.929'],
         sub: 'retrained with the official fine-tune bugs fixed · no instruction, no line stitching',
         aria: 'Qwen3-TTS v3 fixed training · same phrases',
-        src: 'https://cdn.pokoin.com/poko-video/ep5/qwen/en-v3fixed-20261009/en_qwen_samephrase_v3fixed.mp3',
+        src: `${MEDIA_BASE}/poko-video/ep5/qwen/en-v3fixed-20261009/en_qwen_samephrase_v3fixed.mp3`,
       },
       {
         id: 'qwen-expressive',
@@ -200,7 +202,7 @@ export const POKO_TESTS = [
         chips: ['word match 100/100/95 %', 'similarity 0.852'],
         sub: 'same fine-tune · "Expressive Poko" voice instruction',
         aria: 'Qwen3-TTS · Expressive Poko instruction · same phrases',
-        src: 'https://cdn.pokoin.com/poko-video/ep5/qwen/en-expressive-v1-20261009/en_qwen_samephrase_expressive_v1.mp3',
+        src: `${MEDIA_BASE}/poko-video/ep5/qwen/en-expressive-v1-20261009/en_qwen_samephrase_expressive_v1.mp3`,
       },
       {
         id: 'qwen-directed',
@@ -208,7 +210,7 @@ export const POKO_TESTS = [
         chips: ['word match 100/100/95 %', 'similarity 0.897'],
         sub: 'line-by-line direction: fast/slow, high/low, pauses · best of 6–12 takes per line',
         aria: 'Qwen3-TTS · line-by-line directed · same phrases',
-        src: 'https://cdn.pokoin.com/poko-video/ep5/qwen/en-directed-v1b-20261009/en_qwen_samephrase_directed_v1.mp3',
+        src: `${MEDIA_BASE}/poko-video/ep5/qwen/en-directed-v1b-20261009/en_qwen_samephrase_directed_v1.mp3`,
       },
     ],
   }),
@@ -244,7 +246,7 @@ export const POKO_TESTS = [
         chips: ['word match 100/100/95 %', 'similarity 0.922'],
         sub: 'single-speaker fine-tune · English episodes 1–7',
         aria: 'Qwen3-TTS · same phrases',
-        src: 'https://cdn.pokoin.com/poko-video/ep5/qwen/en-all-v1-20261009/en_qwen_samephrase_v1.mp3',
+        src: `${MEDIA_BASE}/poko-video/ep5/qwen/en-all-v1-20261009/en_qwen_samephrase_v1.mp3`,
       },
     ],
   }),
@@ -252,24 +254,24 @@ export const POKO_TESTS = [
     id: 'chatterbox_en_all_v5',
     date: '2026-10-09',
     title: 'Chatterbox V3 · English training · episodes 1–7 · 1 min test',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/en_all_ft_v5/pokemon30-chatterbox-preview-60s.mp4',
-    voiceover: 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/en_all_ft_v5/pokemon30-chatterbox-voiceover-60s.wav',
+    src: `${MEDIA_BASE}/poko-video/ep5/chatterbox/en_all_ft_v5/pokemon30-chatterbox-preview-60s.mp4`,
+    voiceover: `${MEDIA_BASE}/poko-video/ep5/chatterbox/en_all_ft_v5/pokemon30-chatterbox-voiceover-60s.wav`,
     note: 'voice source: newPoko sample dataset (vo/dataset-en-001, episodes 1–7), Chatterbox Multilingual V3, LoRA fine-tuned EN only',
   }),
   video({
     id: 'chatterbox_en_ep7_v4',
     date: '2026-10-09',
     title: 'Chatterbox V3 · English-only training on ep7 · 123 clips · 1 min test',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/en_ep7_ft_v4/pokemon30-chatterbox-preview-60s.mp4',
-    voiceover: 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/en_ep7_ft_v4/pokemon30-chatterbox-voiceover-60s.wav',
+    src: `${MEDIA_BASE}/poko-video/ep5/chatterbox/en_ep7_ft_v4/pokemon30-chatterbox-preview-60s.mp4`,
+    voiceover: `${MEDIA_BASE}/poko-video/ep5/chatterbox/en_ep7_ft_v4/pokemon30-chatterbox-voiceover-60s.wav`,
     note: 'voice source: newPoko sample dataset (vo/dataset-en-001, ep7), Chatterbox Multilingual V3, LoRA fine-tuned EN only',
   }),
   video({
     id: 'chatterbox_en',
     date: '2026-10-09',
     title: 'Pokémon 30th Anniversary — Chatterbox V3 (newPoko) · English · 1 min',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/en_zeroshot/pokemon30-chatterbox-preview-60s.mp4',
-    voiceover: 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/en_zeroshot/pokemon30-chatterbox-voiceover-60s.wav',
+    src: `${MEDIA_BASE}/poko-video/ep5/chatterbox/en_zeroshot/pokemon30-chatterbox-preview-60s.mp4`,
+    voiceover: `${MEDIA_BASE}/poko-video/ep5/chatterbox/en_zeroshot/pokemon30-chatterbox-voiceover-60s.wav`,
     note: 'voice source: newPoko sample dataset (vo/dataset-en-001), Chatterbox Multilingual V3, zero-shot',
   }),
   video({
@@ -277,53 +279,53 @@ export const POKO_TESTS = [
     date: '2026-10-09',
     lang: 'it',
     title: 'Pokémon 30th Anniversary — Chatterbox V3 (newPoko) · Italiano · 1 min',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/it_zeroshot/pokemon30-chatterbox-preview-60s.mp4',
-    voiceover: 'https://cdn.pokoin.com/poko-video/ep5/chatterbox/it_zeroshot/pokemon30-chatterbox-voiceover-60s.wav',
+    src: `${MEDIA_BASE}/poko-video/ep5/chatterbox/it_zeroshot/pokemon30-chatterbox-preview-60s.mp4`,
+    voiceover: `${MEDIA_BASE}/poko-video/ep5/chatterbox/it_zeroshot/pokemon30-chatterbox-voiceover-60s.wav`,
     note: 'voice source: newPoko sample dataset (vo/dataset-it-001), Chatterbox Multilingual V3, zero-shot',
   }),
   video({
     id: 'fenrir',
     date: '2026-10-09',
     title: 'Gemini 3.8 · Fenrir · English · 1 min',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/gemini38/gemini_fenrir_1m.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/gemini38/gemini_fenrir_1m.mp4`,
   }),
   video({
     id: 'fenrir_it',
     date: '2026-10-09',
     lang: 'it',
     title: 'Gemini 3.8 · Fenrir · Italiano · 1 min',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/gemini38/gemini_fenrir_it_1m.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/gemini38/gemini_fenrir_it_1m.mp4`,
   }),
   video({
     id: 'azure1m',
     date: '2026-10-09',
     title: 'Azure · excited · English · 1 min baseline',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/gemini38/azure_excited_1m.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/gemini38/azure_excited_1m.mp4`,
   }),
   video({
     id: 'azure_it',
     date: '2026-10-09',
     lang: 'it',
     title: 'Azure · excited · Italiano · 1 min baseline',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/gemini38/azure_excited_it_1m.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/gemini38/azure_excited_it_1m.mp4`,
   }),
   video({
     id: 'puck',
     date: '2026-10-09',
     title: 'Gemini 3.8 · Puck (upbeat) · EN · 1 min',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/gemini38/gemini_puck_1m.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/gemini38/gemini_puck_1m.mp4`,
   }),
   video({
     id: 'leda',
     date: '2026-10-09',
     title: 'Gemini 3.8 · Leda (youthful) · EN · 1 min',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/gemini38/gemini_leda_1m.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/gemini38/gemini_leda_1m.mp4`,
   }),
   video({
     id: 'achird',
     date: '2026-10-09',
     title: 'Gemini 3.8 · Achird (friendly) · EN · 1 min',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/gemini38/gemini_achird_1m.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/gemini38/gemini_achird_1m.mp4`,
   }),
   audio({
     id: 'en-new-phrases',
@@ -384,19 +386,19 @@ export const POKO_TESTS = [
     id: 'ep5-en',
     date: '2026-10-04',
     title: 'Full episode · English · Azure excited',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/poko_30th_excited_en_720p.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/poko_30th_excited_en_720p.mp4`,
   }),
   video({
     id: 'ep5-it',
     date: '2026-10-04',
     lang: 'it',
     title: 'Full episode · Italiano · Azure excited',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/poko_30th_excited_it_720p.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/poko_30th_excited_it_720p.mp4`,
   }),
   video({
     id: 'ep5-before',
     date: '2026-10-04',
     title: 'Full episode · English · Alloy Turbo (before)',
-    src: 'https://cdn.pokoin.com/poko-video/ep5/poko_30th_alloy_turbo_en_720p.mp4',
+    src: `${MEDIA_BASE}/poko-video/ep5/poko_30th_alloy_turbo_en_720p.mp4`,
   }),
 ];

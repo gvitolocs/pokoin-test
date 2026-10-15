@@ -28,7 +28,7 @@
     { "source": "/marketplace/:path*", "destination": "https://pokoin.com/marketplace/:path*", "permanent": false }
   ],
   "rewrites": [
-    { "source": "/card-images/:path*", "destination": "https://cdn.pokoin.com/:path*" },
+    { "source": "/card-images/:path*", "destination": "https://test-media.pokoin.com/:path*" },
     { "source": "/tests", "destination": "/index.html" },
     { "source": "/tests/", "destination": "/index.html" },
     { "source": "/sanitize", "destination": "/index.html" },

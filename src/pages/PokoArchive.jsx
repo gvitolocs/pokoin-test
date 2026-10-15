@@ -2,7 +2,9 @@ import { createMemo, createSignal, For, onSettled, Show } from 'solid-js';
 import TestDock from '../components/TestDock.jsx';
 import { BoardBar, usePageTitle } from './tools/board.jsx';
 
-const CATALOG_URL = 'https://cdn.pokoin.com/poko-video/newpoko/catalog.json';
+import { MEDIA_BASE } from '../lib/media.js';
+
+const CATALOG_URL = `${MEDIA_BASE}/poko-video/newpoko/catalog.json`;
 
 /** newPoko Gemini Fenrir voice archive — dataset phrases + remade episode lines.
  * */

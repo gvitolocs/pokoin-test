@@ -1,29 +1,33 @@
-/** Point a `/card-images/` path at the CDN. The review boards' scans are not in the
+/** Point a `/card-images/` path at test media (R2). The review boards' scans are not in the
  * catalog cache-buster table, so this does not carry that table. */
 
-export const CDN_ORIGIN = 'https://cdn.pokoin.com';
+import { MEDIA_BASE } from './media.js';
 
-export function cdnFetchUrl(value) {
+export function mediaUrl(value) {
   const text = String(value || '').trim();
   if (!text || text.startsWith('data:') || text.startsWith('blob:')) {
     return text;
   }
   try {
     const url = new URL(text, 'https://pokoin.com');
-    if (url.hostname === 'cdn.pokoin.com') {
-      return `${CDN_ORIGIN}${url.pathname}${url.search}`;
+    const host = url.hostname;
+    if (host === new URL(MEDIA_BASE).hostname) {
+      return `${MEDIA_BASE}${url.pathname}${url.search}`;
     }
     if (url.pathname.startsWith('/card-images/')) {
-      return `${CDN_ORIGIN}${url.pathname.slice('/card-images'.length)}${url.search}`;
+      return `${MEDIA_BASE}${url.pathname.slice('/card-images'.length)}${url.search}`;
     }
   } catch (_) {
     /* fall through */
   }
   if (text.startsWith('/card-images/')) {
-    return `${CDN_ORIGIN}${text.slice('/card-images'.length)}`;
+    return `${MEDIA_BASE}${text.slice('/card-images'.length)}`;
   }
   return text;
 }
+
+/** @deprecated use mediaUrl */
+export const cdnFetchUrl = mediaUrl;
 
 function uniqueUrls(list) {
   const out = [];

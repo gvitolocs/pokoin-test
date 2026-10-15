@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { MEDIA_BASE } from '../lib/media.js';
 import { POKO_TESTS, testsByMonth } from './poko-tests.js';
 
 const OCTOBER_IDS = [
@@ -20,12 +21,12 @@ test('every test has an explicit date and a playable source', () => {
     assert.equal(ids.has(entry.id), false, entry.id);
     ids.add(entry.id);
     if (entry.kind === 'video') {
-      assert.match(entry.src, /^https:\/\/cdn\.pokoin\.com\//, entry.id);
+      assert.match(entry.src, new RegExp(`^${MEDIA_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`), entry.id);
     } else {
       assert.equal(entry.kind, 'audio', entry.id);
       assert.ok(entry.clips?.length, entry.id);
       for (const clip of entry.clips) {
-        assert.match(clip.src, /^https:\/\/cdn\.pokoin\.com\//, clip.id);
+        assert.match(clip.src, new RegExp(`^${MEDIA_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`), clip.id);
         assert.equal(clip.src.includes('/market/poko-audio/'), false, clip.id);
       }
     }

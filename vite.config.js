@@ -1,11 +1,11 @@
 import { defineConfig } from 'vite';
 import solid from '@solidjs/vite-plugin';
+import { MEDIA_BASE } from './src/lib/media.js';
 
-/** OCR scans and artwork mask previews still request `/card-images/*`.
- * CardArt itself talks to cdn.pokoin.com directly. */
+/** OCR scans and artwork mask previews request `/card-images/*` → test media (R2). */
 const cardImages = {
   '/card-images': {
-    target: 'https://cdn.pokoin.com',
+    target: MEDIA_BASE,
     changeOrigin: true,
     rewrite: (pathname) => pathname.replace(/^\/card-images/, ''),
   },
