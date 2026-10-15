@@ -8,7 +8,7 @@ export default function TestDock() {
   const here = () => location.pathname.replace(/\/+$/, '') || '/';
   return (
     <nav class="test-dock" aria-label="Previous tests">
-      <For each={tests.tests}>
+      <For each={tests.tests.filter((entry) => entry.kind !== 'video')}>
         {(entry) => (
           <a href={entry.path} class={{ on: here() === entry.path }}>
             <strong>{entry.label}</strong>

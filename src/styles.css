@@ -1679,6 +1679,17 @@ html.is-extension-desk select.collector-badge.version-badge {
   color: var(--muted);
   opacity: 0.8;
 }
+.tests-card-poster {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #000;
+}
+.tests-dashboard-month .tests-grid {
+  margin-top: 0.75rem;
+}
 
 /* Jumbos board — Jumbo Oversized leftover review grid */
 .jumbos-grid {

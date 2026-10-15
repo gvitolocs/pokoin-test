@@ -67,6 +67,14 @@ export function blocksFor(tests) {
 
 export const POKO_TESTS = [
   video({
+    id: 'ep8-lugia-v2',
+    date: '2026-10-15',
+    title: 'Part 8 · Lugia: the card that never gives up · full episode v2 · voxel Lugia + library music',
+    src: `${MEDIA_BASE}/poko-video/ep8/lugia-v2-20261015/poko_lugia_never_gives_up_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/lugia-v2-20261015/ep8.jpg`,
+    note: 'Lugia is now voxel art from the real game model (X/Y rig, Rust voxkit); the sleeping pose on the seabed was posed with gravity in Blender. Background music from the new library, rotated by mood. Some Lugia assets are still being fixed.',
+  }),
+  video({
     id: 'ep8-voxkit-opening',
     date: '2026-10-15',
     title: 'Part 8 · opening · voxel Lugia from the real game model (Rust voxkit) · review',

@@ -1,7 +1,9 @@
-import { For } from 'solid-js';
+import { For, Show } from 'solid-js';
 import tests from '../../public/review/tests.json';
 import TestDock from '../components/TestDock.jsx';
+import { MEDIA_BASE } from '../lib/media.js';
 import { BoardBar, usePageTitle } from './tools/board.jsx';
+import { testsByMonth } from './poko-tests.js';
 
 // Longer "what this board is for" copy, keyed by route. Falls back to the
 // dock note when a board has no entry here.
@@ -12,11 +14,17 @@ const ABOUT = {
   '/ocr/artists': 'Match the OCR-read illustrator credit to the pokemontcg.io artist table.',
   '/artwork': 'Pokémon-only album hover masks: Qwen3-VL boxes → SAM 2.1 silhouettes, with the whole-silhouette before / after.',
   '/jumbos': 'Every Jumbo Oversized leftover in one grid — homepage tiles with full-resolution links, so wrong pixels under a right name get caught.',
-  '/poko': 'Poko Part 5 (30th Celebration) re-voiced with Azure Dragon HD Omni, excited style — English, Italian, and the previous voice for A/B.',
+  '/poko': 'Poko episodes, dubs and voice tests by month — newest first.',
   '/poko/archive': 'newPoko Gemini Fenrir archive: EN/IT dataset phrases plus remade English episode lines (ep1–ep7), with scripts.',
 };
 
 const BOARDS = tests.tests.filter((board) => board.path !== '/tests');
+const MONTHS = testsByMonth(BOARDS);
+
+function aboutFor(board) {
+  const path = board.path.split('#')[0];
+  return ABOUT[path] || '';
+}
 
 /** test.pokoin.com Test boards index (D00006L). */
 export default function TestsDashboard() {
@@ -35,21 +43,36 @@ export default function TestsDashboard() {
           not production pages.
         </p>
 
-        <section class="tests-grid" aria-label="Review boards">
-          <For each={BOARDS}>
-            {(board) => (
-              <a href={board.path} class="tests-card">
-                <div class="tests-card-head">
-                  <h2>{board.label}</h2>
-                  <time datetime={board.date}>{board.date}</time>
-                </div>
-                <p class="tests-card-note">{board.note}</p>
-                <p class="tests-card-about">{ABOUT[board.path] || ''}</p>
-                <span class="tests-card-path">{board.path}</span>
-              </a>
-            )}
-          </For>
-        </section>
+        <For each={MONTHS}>
+          {(month) => (
+            <section class="poko-video tests-dashboard-month" aria-label={month.label}>
+              <h2>{month.label}</h2>
+              <div class="tests-grid">
+                <For each={month.tests}>
+                  {(board) => (
+                    <a href={board.path} class="tests-card">
+                      <Show when={board.kind === 'video' && board.poster}>
+                        <img
+                          class="tests-card-poster"
+                          src={`${MEDIA_BASE}/${board.poster}`}
+                          alt=""
+                          loading="lazy"
+                        />
+                      </Show>
+                      <div class="tests-card-head">
+                        <h2>{board.label}</h2>
+                        <time datetime={board.date}>{board.date}</time>
+                      </div>
+                      <p class="tests-card-note">{board.note}</p>
+                      <p class="tests-card-about">{aboutFor(board)}</p>
+                      <span class="tests-card-path">{board.path}</span>
+                    </a>
+                  )}
+                </For>
+              </div>
+            </section>
+          )}
+        </For>
       </main>
 
       <TestDock />

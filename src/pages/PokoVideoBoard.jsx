@@ -11,7 +11,7 @@ function TileDate(props) {
 
 function VideoTile(props) {
   return (
-    <li class="poko-tile" lang={props.test.lang}>
+    <li class="poko-tile" id={props.test.id} lang={props.test.lang}>
       <TileDate date={props.test.date} />
       <strong>{props.test.title}</strong>
       <video controls preload="metadata" playsinline poster={props.test.poster} src={props.test.src} />
@@ -34,7 +34,7 @@ function AudioSet(props) {
       <ul class="poko-tiles poko-ab">
         <For each={props.test.clips}>
           {(clip) => (
-            <li class="poko-tile" lang={clip.lang || props.test.lang}>
+            <li class="poko-tile" id={clip.id} lang={clip.lang || props.test.lang}>
               <TileDate date={clip.date || props.test.date} />
               <Show when={props.test.chip || clip.chips?.length}>
                 <span class="poko-chip-row">
