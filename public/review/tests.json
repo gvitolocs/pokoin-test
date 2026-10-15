@@ -1,0 +1,58 @@
+{
+  "tests": [
+    {
+      "path": "/tests",
+      "label": "Dashboard",
+      "note": "All test boards",
+      "date": "2026-09-17"
+    },
+    {
+      "path": "/sanitize",
+      "label": "Sanitize",
+      "note": "Leftover JPEG deskew",
+      "date": "2026-09-02"
+    },
+    {
+      "path": "/espurr",
+      "label": "Espurr",
+      "note": "Same artwork, JP/EN/CN",
+      "date": "2026-09-06"
+    },
+    {
+      "path": "/ocr",
+      "label": "OCR",
+      "note": "Qwen3-VL leftover print",
+      "date": "2026-09-13"
+    },
+    {
+      "path": "/ocr/artists",
+      "label": "Artists",
+      "note": "OCR Illus. matched to pokemontcg.io",
+      "date": "2026-09-13"
+    },
+    {
+      "path": "/artwork",
+      "label": "Artwork",
+      "note": "Whole silhouette · Venusaur",
+      "date": "2026-09-17"
+    },
+    {
+      "path": "/jumbos",
+      "label": "Jumbos",
+      "note": "Jumbo Oversized leftover review",
+      "date": "2026-09-18"
+    },
+    {
+      "path": "/poko",
+      "label": "Poko",
+      "note": "Part 5 excited voice · EN/IT",
+      "date": "2026-10-04"
+    },
+    {
+      "path": "/poko/archive",
+      "label": "newPoko archive",
+      "note": "Fenrir dataset + ep1–7 remakes",
+      "date": "2026-10-08"
+    }
+  ]
+}

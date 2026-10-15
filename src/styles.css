@@ -1,0 +1,1938 @@
+/* Board look from the Pokoin stylesheet: reset, album hover crop, review boards.
+   Marketplace chrome (search, cart, wallet, chat) is not included. */
+
+@font-face {
+  font-family: Satoshi;
+  src: url("/home/satoshi.woff2") format("woff2");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+
+:root {
+  --bg: #000;
+  --g2: #14121c;
+  --g3: #1f202d;
+  --g4: #25222c;
+  --g5: #38363f;
+  --surface: #16141a;
+  --text: #fff;
+  --muted: #9d9aa4;
+  --yellow: #ffd33d;
+  --ct-blue: #5bbad5;
+  --cm-blue: #1a4f9c;
+  --vt-green: #007782;
+  --border: #5c5c5c;
+  --font: Satoshi, ui-sans-serif, system-ui, sans-serif;
+  --max: 80rem;
+  --tcg-corner: 5% / 3.571%;
+  /* Pokemon illustration window. Keep in sync with market/src/art-cut.js */
+  --art-left: 0.086;
+  --art-top: 0.126;
+  --art-width: 0.828;
+  --art-height: 0.338;
+  --card-ratio: 0.715909;
+  /* LinkedIn global-nav is 52px; icons 24px. Poko mark is the large circle;
+     title-language flag is the old logo size. */
+  --topbar-h: 52px;
+  --topbar-icon: 24px;
+  --topbar-logo: 40px;
+  --topbar-flag: 32px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+/* Horizontal rubber-band only. Do not clip html/body — that trapped Arita. */
+html {
+  overscroll-behavior-x: none;
+  scrollbar-color: var(--g5) var(--bg);
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background: var(--g5);
+  border-radius: 8px;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+  background: #4a4852;
+}
+
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input, select { font: inherit; color: inherit; }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+
+.brand img {
+  display: block;
+  width: var(--topbar-logo);
+  height: var(--topbar-logo);
+}
+
+h1, h2 { margin: 0 0 0.85rem; }
+
+.tile {
+  color: inherit;
+  background: var(--g4);
+  border-radius: 16px;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  scroll-snap-align: start;
+  position: relative;
+  z-index: 0;
+}
+
+.tile:hover {
+  text-decoration: none;
+  z-index: 4;
+}
+
+.hero-art,
+.tile-art {
+  display: block;
+  overflow: visible;
+  line-height: 0;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.hero-art {
+  border-radius: var(--tcg-corner);
+  clip-path: inset(0 round var(--tcg-corner));
+}
+
+.tile-art {
+  padding: 0.5rem;
+}
+
+.prod-art.hero-art {
+  cursor: zoom-in;
+  position: relative;
+  align-self: start;
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  place-items: start center;
+}
+
+.tile img,
+.hero-art img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+  background: transparent;
+}
+
+.tile-art img,
+.tile-art .tile-ph {
+  width: 100%;
+  aspect-ratio: 63 / 88;
+}
+
+.hero-art img {
+  border-radius: var(--tcg-corner);
+  clip-path: inset(0 round var(--tcg-corner));
+}
+
+.tile img {
+  border-radius: 0;
+  clip-path: none;
+  transform-origin: 50% 100%;
+  transition: transform 0.12s ease-out, filter 0.12s ease-out;
+}
+
+.art-cut {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: calc(var(--art-width) * var(--card-ratio) / var(--art-height));
+  border-radius: 8px;
+}
+
+.art-cut img,
+.suggest-art .art-cut img,
+.tile-cut .tile-art .art-cut img {
+  position: absolute;
+  width: calc(100% / var(--art-width));
+  max-width: none;
+  height: auto;
+  aspect-ratio: auto;
+  left: calc(-100% * var(--art-left) / var(--art-width));
+  top: calc(-100% * var(--art-top) / var(--art-height));
+  object-fit: fill;
+}
+
+.tile-cut .tile-art .art-cut {
+  width: 100%;
+}
+
+.grid.album-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: dense;
+  align-items: start;
+  gap: 1rem;
+  min-width: 0;
+  width: 100%;
+  /* Tall tiles change the row tracks as pages append. Anchoring fights an
+   * upward scroll and the grid yanks. */
+  overflow-anchor: none;
+}
+
+.tile-album {
+  --art-left: 0.086;
+  --art-top: 0.126;
+  --art-width: 0.828;
+  --art-height: 0.338;
+  --card-ratio: 0.7159090909090909;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  contain: paint;
+  border-radius: 14px;
+  background: var(--album-shade, var(--g4));
+}
+
+/* Two 88∶63 album cells. .art-cut may carry ART_CUT_BLEED. Width-fit the
+ * painting — do not zoom the bleed band to fill height (that crops the
+ * sides). */
+.tile-album.tile-tall {
+  grid-row: span 2;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  justify-self: stretch;
+  align-self: stretch;
+}
+
+.tile-album.tile-tall::before {
+  content: "";
+  display: block;
+  width: 100%;
+  pointer-events: none;
+  aspect-ratio: calc(88 / (2 * 63));
+}
+
+.tile-album.tile-tall .tile-art,
+.tile-album.tile-tall .art-cut {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  aspect-ratio: auto;
+}
+
+/* Width-fit the painting (no side-crop zoom). Start near the top of the
+ * leftover so the two-row cell is painting, not shade under the card. */
+.tile.tile-album.tile-tall .tile-art .art-cut img,
+.tile.tile-album.tile-tall:hover .tile-art .art-cut img {
+  position: absolute;
+  width: calc(100% / var(--art-width));
+  height: auto;
+  max-width: none;
+  aspect-ratio: var(--card-ratio);
+  left: calc(-100% * var(--art-left) / var(--art-width));
+  top: 0;
+  margin-top: calc(-100% * var(--art-top) / var(--art-width) / var(--card-ratio));
+  object-fit: fill;
+}
+
+.tile-album.tile-item .tile-art {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+}
+
+.tile-album.tile-item .tile-art img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  aspect-ratio: auto;
+  object-fit: contain;
+  object-position: center;
+}
+
+.tile-album .tile-art {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+
+.tile-album .art-cut,
+.tile-album .tile-art .tile-ph {
+  width: 100%;
+  border-radius: 0;
+  aspect-ratio: calc(var(--art-width) * var(--card-ratio) / var(--art-height));
+}
+
+/* Regular album cell = a leftover rotated 90° (88×63), same box as
+ * .is-landscape BREAK/LEGEND. Width-fit the era illustration and
+ * vertically center it — do not height-zoom / cover (that clips wings
+ * and cave sides). Suggest stays the tighter illustration window. */
+.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item) .art-cut,
+.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item) .tile-art .tile-ph {
+  aspect-ratio: 88 / 63;
+}
+
+.tile.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item) .tile-art .art-cut img,
+.tile.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item):hover .tile-art .art-cut img {
+  width: calc(100% / var(--art-width));
+  height: auto;
+  max-width: none;
+  aspect-ratio: var(--card-ratio);
+  left: calc(-100% * var(--art-left) / var(--art-width));
+  top: calc(
+    50% - 100% * 88 * 88 / 63 / 63 / var(--art-width)
+      * (var(--art-top) + var(--art-height) * 0.5)
+  );
+}
+
+/* Chrome: keep the leftover JPEG's *layout* box inside the 88∶63 cell.
+ * The Safari fallback above still uses negative left + width > 100%. That
+ * made html.scrollWidth wider than the viewport (classic horizontal
+ * scrollbar) and Chrome native loading=lazy treated the img as outside
+ * overflow:hidden (SO 67390705 / crbug 994329), so tiles stayed blank
+ * until hover prefetch. D00004D would_re_examine_if. */
+@supports (object-view-box: none) {
+  .tile.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item) .tile-art .art-cut img,
+  .tile.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item):hover .tile-art .art-cut img {
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    aspect-ratio: auto;
+    object-fit: contain;
+    object-position: center;
+    object-view-box: xywh(
+      calc(var(--art-left) * 100%)
+      calc(var(--art-top) * 100%)
+      calc(var(--art-width) * 100%)
+      calc(var(--art-height) * 100%)
+    );
+  }
+
+  /* The two-row cell is a row-gap taller than the crop when the
+   * tracks are sized by the one-row tiles. cover fills that strip
+   * instead of leaving shade under the painting. */
+  .tile.tile-album.tile-tall .tile-art .art-cut img,
+  .tile.tile-album.tile-tall:hover .tile-art .art-cut img {
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    margin-top: 0;
+    aspect-ratio: auto;
+    object-fit: cover;
+    object-position: center top;
+    object-view-box: xywh(
+      calc(var(--art-left) * 100%)
+      calc(var(--art-top) * 100%)
+      calc(var(--art-width) * 100%)
+      calc(var(--art-height) * 100%)
+    );
+  }
+}
+
+/* Dissolve the top crop into the tile so the cut is not a hard line.
+ * ::before must sit above the img (z-index auto paints the scan on top). */
+.tile-album:not(.is-landscape):not(.tile-item) .art-cut {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 100%);
+}
+
+.tile-album .tile-art::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1.55rem;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--album-shade, var(--g4)) 70%, transparent),
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(to bottom, #000 18%, transparent);
+  mask-image: linear-gradient(to bottom, #000 18%, transparent);
+}
+
+.tile-album .tile-art::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2rem;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--album-shade, var(--g4)) 78%, transparent),
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(to top, #000 12%, transparent);
+  mask-image: linear-gradient(to top, #000 12%, transparent);
+}
+
+.tile-album .tile-meta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  padding: 0.14rem 0.45rem 0.16rem;
+  gap: 0.04rem;
+  justify-items: center;
+  text-align: center;
+  background: none;
+}
+
+.tile-album .tile-meta strong {
+  color: rgb(255 255 255 / 0.94);
+  font-size: 0.72rem;
+  line-height: 1.15;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.72);
+}
+
+.tile-album .tile-id {
+  color: rgb(255 255 255 / 0.92);
+  font-size: 0.56rem;
+  line-height: 1.15;
+  font-weight: 600;
+  white-space: nowrap;
+  text-align: center;
+  width: 100%;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.72);
+}
+
+.tile-cut:hover img {
+  transform-origin: 50% 50%;
+}
+
+.art-cut .tile-ph {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  left: 0;
+  top: 0;
+}
+
+.tile:hover img {
+  transform: scale(1.12);
+  filter: drop-shadow(0 14px 22px rgb(0 0 0 / 0.5));
+}
+
+.tile.tile-album,
+.tile.tile-album:hover {
+  z-index: 0;
+  overflow: hidden;
+}
+
+.tile.tile-album img,
+.tile.tile-album:hover img,
+.tile.tile-album .art-cut img,
+.tile.tile-album:hover .art-cut img {
+  transform: none !important;
+  filter: none !important;
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Keep the painting still and enlarge only SAM's transparent Pokemon
+ * silhouette. The grounding rectangle is never rendered. This duplicate
+ * uses the cached card image; the tiny WebP is only its alpha mask. */
+.tile.tile-album .art-cut img.art-figure-layer {
+  pointer-events: none;
+  opacity: 0;
+  transform-origin: 50% 50%;
+}
+
+/* Hundreds of promoted blur layers made scrolling back up flicker. */
+.tile.tile-album:not(:hover):not(:focus-within) .art-cut img.art-figure-layer {
+  content-visibility: hidden;
+}
+
+.tile.tile-album .art-cut img.art-figure-hover {
+  z-index: 3;
+  -webkit-mask-image: var(--art-figure-mask);
+  mask-image: var(--art-figure-mask);
+  -webkit-mask-mode: alpha;
+  mask-mode: alpha;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  /* No opacity transition here on purpose: the base state is the unhover
+   * destination, so the silhouette must cut out instantly when the pointer
+   * leaves. The fade-in lives on the :hover/:focus rules only. */
+  transition: transform 0.14s ease-out !important;
+}
+
+/* The mask WebP itself is a solid, transparent-background silhouette. Use
+ * it as a separate dark blurred underlay; the sharp layer above remains the
+ * original full-colour card art, so the Pokemon interior is never hollow. */
+.tile.tile-album .art-cut img.art-figure-shadow {
+  z-index: 2;
+  filter: brightness(0) blur(9px) !important;
+  transition: transform 0.14s ease-out !important;
+}
+
+.tile.tile-album:hover .art-cut img.art-figure-hover {
+  opacity: 1;
+  transform: scale(1.12) !important;
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
+  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
+}
+
+.tile.tile-album:hover .art-cut img.art-figure-shadow {
+  opacity: 0.62;
+  transform: translateY(7px) scale(1.12) !important;
+  filter: brightness(0) blur(9px) !important;
+  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
+}
+
+/* Focus follows the silhouette: softly defocus the painting beneath the
+ * zoomed Pokemon. Only tiles that actually carry a figure layer blur, and
+ * the unhover exit stays instant because the base transition rules above
+ * win again once this rule stops matching. */
+.tile.tile-album:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
+.tile.tile-album:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+  filter: blur(2px) saturate(1.05) !important;
+  transition: filter 0.18s ease-out !important;
+}
+
+/* Chrome object-view-box crops the base scan into the element itself. Keep
+ * the masked duplicate as a full-card-sized layer so its full-card alpha map
+ * stays pixel-aligned before the album container clips it. */
+@property --album-figure-w {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@supports (object-view-box: none) {
+  .tile.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item) .tile-art .art-cut img.art-figure-layer,
+  .tile.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item):hover .tile-art .art-cut img.art-figure-layer {
+    object-view-box: none;
+    width: calc(100% / var(--art-width));
+    height: auto;
+    aspect-ratio: var(--card-ratio);
+    left: calc(-100% * var(--art-left) / var(--art-width));
+    top: calc(
+      50% - 100% * 88 * 88 / 63 / 63 / var(--art-width)
+        * (var(--art-top) + var(--art-height) * 0.5)
+    );
+  }
+
+  /* Full-art cells are a row-gap taller than the bleed window, and the
+   * painting uses object-fit: cover from the top. A width-fit silhouette
+   * sat above that Pokémon and the 1.12 scale (from the full-card center)
+   * shoved the tile. Cover the same window and grow from its center. */
+  .tile-album.tile-tall .art-cut {
+    container-type: size;
+  }
+
+  .tile.tile-album.tile-tall .tile-art .art-cut img.art-figure-layer,
+  .tile.tile-album.tile-tall:hover .tile-art .art-cut img.art-figure-layer {
+    --album-figure-w: max(
+      calc(100cqw / var(--art-width)),
+      calc(100cqh * var(--card-ratio) / var(--art-height))
+    );
+    object-view-box: none;
+    position: absolute;
+    width: var(--album-figure-w);
+    height: auto;
+    max-width: none;
+    aspect-ratio: var(--card-ratio);
+    margin-top: 0;
+    left: calc(
+      (100cqw - var(--art-width) * var(--album-figure-w)) / 2
+      - var(--art-left) * var(--album-figure-w)
+    );
+    top: calc(-1 * var(--art-top) * var(--album-figure-w) / var(--card-ratio));
+    transform-origin:
+      calc((var(--art-left) + var(--art-width) / 2) * 100%)
+      calc((var(--art-top) + var(--art-height) * 0.36) * 100%);
+  }
+}
+
+/* LEGEND / BREAK: leftover is 63:88 with the name bar on the left. Same +90deg
+ * as .suggest-art.is-landscape so the print sits landscape in the album cell.
+ * Size from container queries — % height on the img resolves against width
+ * and `.tile-art img { aspect-ratio: 63 / 88 }` would clip the rotate. */
+.tile-album.is-landscape .tile-art {
+  aspect-ratio: 88 / 63;
+  container-type: size;
+  position: relative;
+  overflow: hidden;
+}
+
+.tile-album.is-landscape .tile-art img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100cqh;
+  height: 100cqw;
+  max-width: none;
+  aspect-ratio: auto;
+  object-fit: fill;
+  transform-origin: 50% 50%;
+}
+
+.tile.tile-album.is-landscape img,
+.tile.tile-album.is-landscape:hover img {
+  transform: translate(-50%, -50%) rotate(90deg) !important;
+}
+
+.tile-album.is-landscape .tile-art img[data-scan-orient="landscape"] {
+  width: 100cqw;
+  height: 100cqh;
+}
+
+.tile.tile-album.is-landscape img[data-scan-orient="landscape"],
+.tile.tile-album.is-landscape:hover img[data-scan-orient="landscape"] {
+  transform: translate(-50%, -50%) !important;
+}
+
+.tile-album.tile-skel .tile-ph,
+.tile-album.tile-skel .skel-line {
+  animation: none;
+}
+
+.tile-ph {
+  display: block;
+  width: 100%;
+  aspect-ratio: 63 / 88;
+  background: var(--g3) url("/home/missing-card.webp") center / contain no-repeat;
+  border-radius: var(--tcg-corner);
+}
+
+.art-frame img.missing-card,
+.tile img.missing-card,
+.zoom img.missing-card {
+  border-radius: var(--tcg-corner);
+  clip-path: inset(0 round var(--tcg-corner));
+}
+
+.linkish {
+  background: none;
+  border: 0;
+  color: var(--yellow);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0;
+  text-decoration: none;
+}
+.linkish:hover { text-decoration: none; }
+
+dialog.zoom:not([open]) {
+  display: none !important;
+}
+
+.zoom[open] {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: 100vh;
+  margin: 0;
+  padding: 1.25rem;
+  border: 0;
+  outline: none;
+  background: transparent;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.zoom:focus,
+.zoom:focus-visible {
+  outline: none;
+}
+
+.zoom::backdrop {
+  background: rgb(0 0 0 / 0.88);
+}
+
+.zoom img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(96vw, 42rem);
+  max-height: min(92vh, 58rem);
+  object-fit: contain;
+  background: transparent;
+  border-radius: 0;
+  clip-path: none;
+  cursor: zoom-out;
+  filter: drop-shadow(0 18px 40px rgb(0 0 0 / 0.55));
+}
+
+.zoom.is-landscape img {
+  transform: rotate(90deg);
+  max-width: min(92vh, 58rem);
+  max-height: min(96vw, 42rem);
+}
+
+.zoom.is-landscape img[data-scan-orient="landscape"] {
+  transform: none;
+  max-width: min(96vw, 58rem);
+  max-height: min(92vh, 42rem);
+}
+
+@media (max-width: 480px) {
+  .tile-art {
+    padding: 0.45rem;
+  }
+
+  .tile-album .tile-art {
+    padding: 0;
+  }
+  .tile-album .tile-meta {
+    padding: 0.12rem 0.36rem 0.14rem;
+  }
+}
+
+.sanitize {
+  min-height: 100vh;
+  background: #0b0b0f;
+}
+
+.sanitize-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: rgb(0 0 0 / 0.92);
+  border-bottom: 1px solid rgb(255 211 61 / 0.45);
+}
+
+.sanitize-host {
+  margin: 0;
+  flex: 1;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.sanitize-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--yellow);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sanitize-main {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 6.5rem;
+}
+
+.test-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.55rem 1.25rem;
+  overflow-x: auto;
+  background: rgb(0 0 0 / 0.94);
+  border-top: 1px solid rgb(255 211 61 / 0.45);
+}
+
+.test-dock a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  min-width: 9.5rem;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.test-dock a strong {
+  color: #fff;
+  font-size: 0.92rem;
+}
+
+.test-dock a span,
+.test-dock a time {
+  font-size: 0.72rem;
+}
+
+.test-dock a.on {
+  border-color: rgb(255 211 61 / 0.7);
+  color: var(--yellow);
+}
+
+.test-dock a.on strong {
+  color: var(--yellow);
+}
+
+.artwork-hover-page .sanitize-main {
+  max-width: 88rem;
+}
+
+.artwork-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-top: 2rem;
+}
+
+.artwork-test-case {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.035);
+}
+
+.artwork-test-card {
+  width: 100%;
+  outline: none;
+}
+
+.artwork-test-card:focus-visible {
+  box-shadow: 0 0 0 3px rgb(255 211 61 / 0.75);
+}
+
+.artwork-test-card:focus .art-cut img.art-figure-hover {
+  opacity: 1;
+  transform: scale(1.12) !important;
+  filter: drop-shadow(0 8px 10px rgb(0 0 0 / 0.42)) !important;
+  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
+}
+
+.artwork-test-card:focus .art-cut img.art-figure-shadow {
+  opacity: 0.62;
+  transform: translateY(7px) scale(1.12) !important;
+  filter: brightness(0) blur(9px) !important;
+  transition: transform 0.14s ease-out, opacity 0.08s linear !important;
+}
+
+.artwork-hover-hint {
+  position: absolute;
+  right: 0.65rem;
+  bottom: 0.55rem;
+  z-index: 3;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.72);
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.artwork-test-copy {
+  padding: 0.9rem 0.25rem 0.2rem;
+}
+
+.artwork-test-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.artwork-test-heading h2,
+.artwork-test-copy p {
+  margin: 0;
+}
+
+.artwork-test-copy p {
+  margin-top: 0.45rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.artwork-status {
+  padding: 0.2rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.artwork-status.is-pass {
+  color: #70e4a1;
+}
+
+.artwork-status.is-review {
+  color: var(--yellow);
+}
+
+.artwork-test-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.artwork-mask-preview {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 5.25rem;
+  margin-top: 0.9rem;
+  padding: 0.4rem;
+  border-radius: 10px;
+  background-color: #333740;
+  background-image:
+    linear-gradient(45deg, #464b56 25%, transparent 25%),
+    linear-gradient(-45deg, #464b56 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #464b56 75%),
+    linear-gradient(-45deg, transparent 75%, #464b56 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.artwork-mask-preview img {
+  display: block;
+  width: 4.5rem;
+  height: 4.5rem;
+  object-fit: contain;
+}
+
+.artwork-section-title {
+  margin: 2.5rem 0 0;
+}
+
+.artwork-case-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.artwork-mask-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  padding: 0.4rem;
+  border-radius: 10px;
+  background-color: #333740;
+  background-image:
+    linear-gradient(45deg, #464b56 25%, transparent 25%),
+    linear-gradient(-45deg, #464b56 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #464b56 75%),
+    linear-gradient(-45deg, transparent 75%, #464b56 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.artwork-mask-pair figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.artwork-mask-pair img {
+  display: block;
+  width: 100%;
+  height: 7rem;
+  object-fit: contain;
+}
+
+.artwork-mask-pair figcaption {
+  margin-top: 0.25rem;
+  color: #fff;
+  font-size: 0.72rem;
+  text-align: center;
+  text-shadow: 0 1px 3px #000;
+}
+
+.artwork-mask-preview span {
+  color: #fff;
+  font-size: 0.78rem;
+  text-shadow: 0 1px 3px #000;
+}
+
+@media (max-width: 850px) {
+  .artwork-review-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sanitize-lead,
+.sanitize-note,
+.sanitize-kicker {
+  color: var(--muted);
+  max-width: 46rem;
+}
+
+.sanitize-kicker {
+  margin: 0 0 0.35rem;
+  color: var(--yellow);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+.sanitize-block {
+  margin: 2.25rem 0;
+}
+
+.sanitize-block h1,
+.sanitize-block h2 {
+  margin: 0 0 0.5rem;
+}
+
+.sanitize-subblock {
+  margin-top: 1.5rem;
+}
+
+.sanitize-subblock h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #ddd;
+}
+
+.sanitize-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.1rem;
+}
+
+.espurr-group {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.espurr-head {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.espurr-artbox {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #111;
+  border: 1px solid rgb(255 211 61 / 0.35);
+}
+
+.espurr-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.1rem;
+}
+
+.espurr-flag {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid rgb(255 211 61 / 0.55);
+  color: var(--yellow);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.espurr-missing {
+  min-height: 12rem;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgb(255 255 255 / 0.18);
+  color: var(--muted);
+  background: #111;
+}
+
+.espurr-empty .sanitize-frame {
+  cursor: default;
+}
+
+.ocr-main {
+  max-width: 86rem;
+}
+
+.ocr-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 1rem 0 0.35rem;
+  position: sticky;
+  top: 3.4rem;
+  z-index: 30;
+  padding: 0.55rem 0 0.65rem;
+  background: rgb(8 8 10 / 0.94);
+}
+
+.ocr-filters button {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ocr-filters button.on {
+  border-color: rgb(255 211 61 / 0.7);
+  color: var(--yellow);
+}
+
+.ocr-filters input[type="search"] {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background: #111;
+  color: #fff;
+  font: inherit;
+}
+
+.ocr-artist-wrap {
+  margin-top: 0.75rem;
+  overflow-x: auto;
+}
+
+.ocr-artist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.ocr-artist-table th,
+.ocr-artist-table td {
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  vertical-align: top;
+}
+
+.ocr-artist-table th:nth-child(2),
+.ocr-artist-table td:nth-child(2) {
+  text-align: right;
+  width: 6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ocr-artist-table a {
+  color: var(--yellow);
+}
+
+.ocr-expansion {
+  margin-top: 1.35rem;
+  padding-top: 0.95rem;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.ocr-expansion-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.7rem;
+  margin-bottom: 0.65rem;
+}
+
+.ocr-expansion-head h2 {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 750;
+}
+
+.ocr-print-flag {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+}
+
+.ocr-nat {
+  color: var(--yellow);
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.ocr-total {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.ocr-expansion-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.ocr-disagree {
+  border-top-color: rgb(255 211 61 / 0.45);
+}
+
+.ocr-qwen {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.ocr-qwen-miss {
+  color: var(--yellow);
+}
+
+.ocr-why {
+  margin: 0 0 0.55rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.ocr-expansion-row figure {
+  margin: 0;
+}
+
+.ocr-expansion-row figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.ocr-expansion-row figcaption a {
+  color: #ddd;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ocr-sample {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgb(255 211 61 / 0.35);
+}
+
+.ocr-sample summary {
+  cursor: pointer;
+  color: var(--yellow);
+  font-weight: 700;
+}
+
+.ocr-card {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.ocr-zones {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.ocr-zone pre {
+  margin: 0.25rem 0 0;
+  padding: 0.65rem 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #ddd;
+  background: #111;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.ocr-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, rgb(255 211 61 / 0.22) 0%, rgb(255 211 61 / 0.22) 22%, transparent 22%),
+    linear-gradient(to bottom, transparent 42%, rgb(80 160 255 / 0.2) 42%, rgb(80 160 255 / 0.2) 84%, transparent 84%),
+    linear-gradient(to bottom, transparent 82%, rgb(255 60 60 / 0.28) 82%, rgb(255 60 60 / 0.28) 100%);
+}
+
+.sanitize-shot {
+  margin: 0;
+}
+
+.sanitize-frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: #0b0b0f;
+  cursor: zoom-in;
+}
+
+.sanitize-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #0b0b0f;
+}
+
+.sanitize-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, transparent 11.9%, rgb(255 60 60 / 0.85) 12%, rgb(255 60 60 / 0.85) 12.25%, transparent 12.35%),
+    linear-gradient(to bottom, transparent 67.7%, rgb(255 60 60 / 0.85) 67.8%, rgb(255 60 60 / 0.85) 68.05%, transparent 68.15%);
+}
+
+.sanitize-shot figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.55rem;
+  color: var(--muted);
+}
+
+.sanitize-shot strong {
+  color: #fff;
+}
+
+.sanitize-details {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: #9aa0a6;
+}
+
+.sanitize-details li {
+  margin: 0.15rem 0;
+}
+
+.sanitize-metric {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: #c9a227;
+}
+
+.sanitize-strip {
+  display: block;
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0;
+  border: 0;
+  background: #0b0b0f;
+  cursor: zoom-in;
+}
+
+.sanitize-strip img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sanitize-deferred-list {
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 46rem;
+}
+
+.sanitize-deferred-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sanitize-deferred-list strong {
+  color: #ddd;
+}
+
+@media (max-width: 720px) {
+  .sanitize-bar {
+    flex-wrap: wrap;
+  }
+  .sanitize-pair,
+  .espurr-row,
+  .ocr-card {
+    grid-template-columns: 1fr;
+  }
+  .espurr-head {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .cart-row {
+    grid-template-columns: 48px 1fr;
+  }
+  .cart-row .sell-field,
+  .cart-row strong,
+  .cart-row .linkish {
+    grid-column: 1 / -1;
+  }
+  .pkg-grid,
+  .swap-grid,
+  .add-head {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+  .silver-tools,
+  .silver-pills,
+  .silver-note {
+    text-align: left;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  .hero-deal .silver-tools.is-locked {
+    text-align: center;
+  }
+}
+
+html.is-extension-desk,
+html.is-extension-desk body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
+html.is-extension-desk .foot {
+  display: none;
+}
+
+html.is-extension-desk main {
+  padding: 0.55rem 0.65rem 1rem;
+}
+
+html.is-extension-desk .art-num-row {
+  grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
+}
+
+html.is-extension-desk .art-nav {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+html.is-extension-desk .collector-badge,
+html.is-extension-desk select.collector-badge.version-badge {
+  width: 100%;
+  height: 2.25rem;
+  line-height: calc(2.25rem - 2px);
+}
+
+.catalog-fold {
+  margin: 1.15rem 0 0;
+}
+
+.catalog-fold > summary,
+.foot-catalog > summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.catalog-fold > summary {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.catalog-fold .crumbs {
+  margin: 0.7rem 0 0.45rem;
+}
+
+.catalog-fold .related-hubs {
+  margin: 0 0 0.55rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.catalog-fold .related-hubs a {
+  color: inherit;
+}
+
+.foot-catalog {
+  margin: 0.45rem 0 0;
+}
+
+.foot-catalog > summary {
+  color: #fff;
+}
+
+.foot-catalog nav a {
+  display: block;
+  margin: 0.3rem 0;
+}
+
+.hub-index {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+  gap: 0.35rem 0.8rem;
+  margin: 0 0 1.4rem;
+  padding: 0;
+  list-style: none;
+}
+
+.hub-index-wide {
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+
+.hub-index a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.hub-index a:hover {
+  text-decoration: underline;
+}
+
+.hub-dex {
+  display: inline-block;
+  min-width: 3.4rem;
+  margin-right: 0.35rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hub-index-block h2 {
+  margin: 1.4rem 0 0.6rem;
+  font-size: 1.05rem;
+}
+
+.related-panel .panel-head a {
+  color: var(--yellow);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.related-grid {
+  margin-bottom: 0;
+}
+
+.guide-body {
+  max-width: 40rem;
+  line-height: 1.55;
+}
+
+.guide-body a {
+  color: inherit;
+}
+
+/* Email preferences */
+.email-pref-list {
+  display: grid;
+  gap: 0.85rem;
+}
+.email-pref-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border, #5c5c5c);
+  border-radius: 12px;
+  background: var(--surface-2, #24212b);
+  cursor: pointer;
+}
+.email-pref-row input {
+  margin-top: 0.2rem;
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--yellow, #ffd33d);
+  flex: 0 0 auto;
+}
+.email-pref-row input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.email-pref-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+.email-pref-copy strong {
+  color: var(--text, #fff);
+}
+.email-pref-copy span {
+  color: var(--muted, #dee6e8);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+.email-pref-status {
+  margin-top: 0.85rem;
+}
+
+/* Test boards dashboard (/tests) */
+.tests-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin-top: 1.75rem;
+}
+.tests-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 1.1rem 0.9rem;
+  border: 1px solid rgb(255 211 61 / 0.18);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.02);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+.tests-card:hover,
+.tests-card:focus-visible {
+  border-color: var(--yellow);
+  background: rgb(255 211 61 / 0.06);
+  transform: translateY(-2px);
+  outline: none;
+}
+.tests-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.tests-card-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #f4f4f7;
+}
+.tests-card-head time {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tests-card-note {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.86rem;
+  color: var(--yellow);
+}
+.tests-card-about {
+  margin: 0;
+  flex: 1;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.tests-card-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+/* Jumbos board — Jumbo Oversized leftover review grid */
+.jumbos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1rem;
+}
+.jumbos-set h2 {
+  font-size: 1.05rem;
+  color: var(--yellow);
+  margin: 2.2rem 0 0.8rem;
+}
+.jumbos-set h2 small { color: var(--muted); font-weight: 400; }
+.jumbos-grid figure {
+  margin: 0;
+  background: var(--g1, #14131a);
+  border: 1px solid var(--g4, #262433);
+  border-radius: 10px;
+  padding: 0.55rem;
+}
+.jumbos-grid figure img {
+  width: 100%;
+  aspect-ratio: 63 / 88;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+  background: var(--g2, #1c1b25);
+}
+.poko-video { margin: 1.5rem 0 2rem; }
+.poko-video video { display: block; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; }
+.poko-video p { margin: .5rem 0 0; }
+
+.poko-archive .sanitize-main,
+.poko-video-board .sanitize-main { padding-bottom: 9rem; }
+
+.poko-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: .75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.poko-groups { grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); }
+.poko-ab { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+.poko-videos { grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); }
+
+.poko-tile,
+.poko-groups button {
+  background: var(--surface);
+  border: 1px solid rgb(255 255 255 / .12);
+  border-radius: 12px;
+  padding: .8rem .9rem;
+}
+.poko-tile:hover,
+.poko-groups button:hover { border-color: rgb(255 211 61 / .45); }
+.poko-groups button.on,
+.poko-groups button:active,
+.poko-groups button:focus-visible { border-color: rgb(255 211 61 / .7); }
+
+.poko-groups button {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  font: inherit;
+  text-align: left;
+  color: var(--muted);
+  cursor: pointer;
+}
+.poko-tile strong,
+.poko-groups button strong { color: #fff; }
+.poko-groups button.on strong { color: var(--yellow); }
+
+.poko-chip {
+  display: inline-block;
+  padding: .12rem .45rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / .08);
+  color: var(--muted);
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.poko-chip-row { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .45rem; }
+
+.poko-tile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .6rem;
+  align-items: center;
+  margin-bottom: .45rem;
+}
+.poko-tile-meta code { font-size: .9rem; color: #fff; }
+.poko-tile-duration { font-size: .72rem; color: var(--muted); }
+
+.poko-tile-text {
+  margin: 0 0 .55rem;
+  line-height: 1.4;
+  min-height: calc(3 * 1.4em);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.poko-tile-text.is-empty { color: var(--muted); font-style: italic; }
+
+.poko-tile audio { display: block; width: 100%; height: 36px; }
+.poko-tile video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 10px;
+  margin-bottom: .5rem;
+}
+.poko-tile-title {
+  display: block;
+  margin-bottom: .45rem;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+.poko-tile-title:hover { color: var(--yellow); }
+.poko-tile-sub { display: block; margin-bottom: .45rem; font-size: .85rem; color: var(--muted); }
+.poko-tile-links { display: flex; flex-wrap: wrap; gap: .5rem; font-size: .8rem; }
+.poko-tile-links a { color: var(--yellow); text-decoration: none; }
+.poko-tile-links a:hover { text-decoration: underline; }
+.poko-caption { color: var(--muted); font-size: .85rem; }
+
+.poko-archive-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem 1rem;
+  align-items: end;
+  margin: 1rem 0 1.25rem;
+}
+.poko-archive-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  font-size: .85rem;
+  color: var(--muted);
+}
+.poko-archive-controls input[type="search"] {
+  min-width: 16rem;
+  padding: .45rem .6rem;
+  border: 1px solid rgb(255 255 255 / .18);
+  border-radius: 8px;
+  font: inherit;
+  background: var(--surface);
+  color: var(--text);
+}
+.poko-archive-script {
+  align-self: end;
+  padding: .55rem .8rem;
+  border: 1px solid rgb(255 255 255 / .18);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.poko-archive-script:hover { border-color: rgb(255 211 61 / .45); }
+.poko-controls-count { color: var(--muted); font-size: .85rem; }
+
+.poko-test-archive h3 { margin: 1.4rem 0 .6rem; font-size: 1rem; color: #fff; }
+.poko-clip-group { margin-bottom: 1.25rem; }
+.jumbos-grid figcaption {
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--text);
+}
+.jumbos-grid figcaption a {
+  color: inherit;
+  text-decoration: none;
+  display: block;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jumbos-grid figcaption a:hover { color: var(--yellow); }
+.jumbos-num { display: block; color: var(--muted); }
+.jumbos-id { display: block; color: var(--muted); }
+.jumbos-missing { outline: 2px solid #ef4444; }
+
+/* Album hover pop-out: the zoomed Pokémon silhouette leaves the frame.
+ * Only where object-view-box crops the base painting inside its own box
+ * (Chrome/Edge): the painting keeps a rounded clip of its own, and the tile,
+ * art box and crop box stop clipping so just the masked figure and its shadow
+ * overflow. Safari positions the painting with negative offsets, so it keeps
+ * the in-frame zoom. */
+@supports (object-view-box: none) {
+  .tile.tile-album:has(img.art-figure-hover):hover,
+  .tile.tile-album:has(img.art-figure-hover):focus-within {
+    position: relative;
+    z-index: 6;
+    overflow: visible;
+    contain: none;
+  }
+
+  .tile-pile-wrap:has(img.art-figure-hover):hover,
+  .tile-pile-wrap:has(img.art-figure-hover):focus-within {
+    position: relative;
+    z-index: 6;
+  }
+
+  .tile.tile-album:has(img.art-figure-hover):hover .tile-art,
+  .tile.tile-album:has(img.art-figure-hover):hover .art-cut,
+  .tile.tile-album:has(img.art-figure-hover):focus-within .tile-art,
+  .tile.tile-album:has(img.art-figure-hover):focus-within .art-cut {
+    overflow: visible;
+  }
+
+  .tile.tile-album:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
+  .tile.tile-album:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+    clip-path: inset(0 round 14px);
+  }
+
+  .tile.tile-album:hover .art-cut img.art-figure-hover {
+    transform: translateY(-3%) scale(1.18) !important;
+  }
+
+  .tile.tile-album:hover .art-cut img.art-figure-shadow {
+    transform: translateY(5%) scale(1.18) !important;
+  }
+
+  /* Full art already fills two rows. The pop-out (overflow visible + a
+   * lift) grows the grid track and parks the silhouette above the Pokémon. */
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover,
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within {
+    z-index: 0;
+    overflow: hidden;
+    contain: paint;
+  }
+
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .tile-art,
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .art-cut,
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .tile-art,
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .art-cut {
+    overflow: hidden;
+  }
+
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+    clip-path: none;
+  }
+
+  .tile.tile-album.tile-tall:hover .art-cut img.art-figure-hover,
+  .tile.tile-album.tile-tall:focus-within .art-cut img.art-figure-hover {
+    transform: scale(1.12) !important;
+  }
+
+  .tile.tile-album.tile-tall:hover .art-cut img.art-figure-shadow,
+  .tile.tile-album.tile-tall:focus-within .art-cut img.art-figure-shadow {
+    transform: translateY(7px) scale(1.12) !important;
+  }
+}
