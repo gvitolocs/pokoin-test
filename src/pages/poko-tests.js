@@ -67,6 +67,14 @@ export function blocksFor(tests) {
 
 export const POKO_TESTS = [
   video({
+    id: 'ep8-sleep-curl',
+    date: '2026-10-15',
+    title: 'Part 8 · opening · sleeping Lugia v2 · curled up, face to camera',
+    src: `${MEDIA_BASE}/poko-video/ep8/sleep-curl-20261015/lugia-opening-curl-720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/sleep-curl-20261015/lugia-opening-curl.jpg`,
+    note: 'New sleeping pose built from the game rig in Blender: lying on its belly, head resting in front with the eye mask visible, wings forward like paws, tail wrapped along the sand. Music: test A bed (Eternal Hope, Kevin MacLeod, CC BY 4.0).',
+  }),
+  video({
     id: 'ep8-music-a',
     date: '2026-10-15',
     title: 'Part 8 · music test A · Eternal Hope',
