@@ -54,6 +54,8 @@ Upload from nezopt (uses `~/.bun/bin/wrangler`; run in a shell that has `CLOUDFL
 
 Do not commit `.media-upload.done`.
 
+Some jumbo card image keys in review JSON are **aliases**: the old CDN served them from another object (`x-pokoin-cdn-object-key`). `media-aliases.json` maps requested key → source object key; `scripts/media-manifest.mjs` records `aliasOf` and hashes the source, and `scripts/upload-media-r2.sh` uploads the source bytes under the requested key. Seven `figure-masks-whole/v*.webp` keys have no object on the old CDN either; the artwork board falls back when they are absent.
+
 ### Add a Poko test
 
 Picture and voice tests live in `src/pages/poko-tests.js`. Add one object to `POKO_TESTS` with a `date` (`YYYY-MM-DD`). Newest date is listed first inside its month. Upload the file to R2 under `poko-video/…` (same path as on the old CDN), point `src` (and `poster` / `voiceover` for video) at `` `${MEDIA_BASE}/poko-video/…` ``. Do not commit the media into this repo. Re-run `node scripts/media-manifest.mjs` and commit the manifest if keys changed.

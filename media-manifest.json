@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-10-15T13:39:50.269Z",
+  "generatedAt": "2026-10-15T14:16:34.805Z",
   "mediaBase": "https://test-media.pokoin.com",
   "bucket": "pokoin-test-media",
   "counts": {
     "keys": 5624,
-    "bytes": 1475055180,
-    "missing": 15
+    "bytes": 1476418369,
+    "missing": 7
   },
   "byFolder": {
     "(root)": 4423,
@@ -15,21 +15,13 @@
     "poko-video": 1177
   },
   "byFolderBytes": {
-    "(root)": 1037957725,
+    "(root)": 1039320914,
     "figure-masks": 30992,
     "figure-masks-clean": 12290,
     "figure-masks-whole": 1782,
     "poko-video": 437052391
   },
   "missing": [
-    "488638_victini.jpg",
-    "488638_victini_homepage.webp",
-    "516728_giratina-vstar-jumbo-oversized-131-sm-black-star-promos.jpg",
-    "516728_giratina-vstar-jumbo-oversized-131-sm-black-star-promos_homepage.webp",
-    "604258_victini-jumbo-oversized-032-bw-black-star-promos.jpg",
-    "604258_victini-jumbo-oversized-032-bw-black-star-promos_homepage.webp",
-    "689906_victini.jpg",
-    "689906_victini_homepage.webp",
     "figure-masks-whole/v219698.webp",
     "figure-masks-whole/v219702.webp",
     "figure-masks-whole/v219706.webp",
@@ -44197,60 +44189,66 @@
       "sources": [
         "public/review/jumbos.json"
       ],
-      "object": null,
-      "objectStore": null,
-      "size": null,
-      "sha256": null
+      "object": "/home/nez/data/pokoin-leftovers/objects/244319_victini.jpg",
+      "objectStore": "nezopt",
+      "size": 90766,
+      "sha256": "d37e343786ac58ecc8ac6e97cf4d0eed79fd67d7027ff22d7231ff0280d45c6d",
+      "aliasOf": "244319_victini.jpg"
     },
     {
       "key": "488638_victini_homepage.webp",
       "sources": [
         "public/review/jumbos.json"
       ],
-      "object": null,
-      "objectStore": null,
-      "size": null,
-      "sha256": null
+      "object": "/home/nez/data/pokoin-leftovers/objects/244319_victini_homepage.webp",
+      "objectStore": "nezopt",
+      "size": 22452,
+      "sha256": "9286c79cf200d6d72b7f77f51269e8cd8ea7b3a11f4d51fed51747ef529e791b",
+      "aliasOf": "244319_victini_homepage.webp"
     },
     {
       "key": "516728_giratina-vstar-jumbo-oversized-131-sm-black-star-promos.jpg",
       "sources": [
         "public/review/jumbos.json"
       ],
-      "object": null,
-      "objectStore": null,
-      "size": null,
-      "sha256": null
+      "object": "/home/nez/data/pokoin-leftovers/objects/258364_giratina-vstar-jumbo-oversized-131-sm-black-star-promos.jpg",
+      "objectStore": "nezopt",
+      "size": 99070,
+      "sha256": "501d8f2f82b8980c245f2e8ba8e2927744659e9dc45e178bec565485bb0336f2",
+      "aliasOf": "258364_giratina-vstar-jumbo-oversized-131-sm-black-star-promos.jpg"
     },
     {
       "key": "516728_giratina-vstar-jumbo-oversized-131-sm-black-star-promos_homepage.webp",
       "sources": [
         "public/review/jumbos.json"
       ],
-      "object": null,
-      "objectStore": null,
-      "size": null,
-      "sha256": null
+      "object": "/home/nez/data/pokoin-leftovers/objects/258364_giratina-vstar-jumbo-oversized-131-sm-black-star-promos_homepage.webp",
+      "objectStore": "nezopt",
+      "size": 27884,
+      "sha256": "bc166917617cc6a501b2a3b867bd6f80786a7c537ad6193e07ad9b1b1a5ddf70",
+      "aliasOf": "258364_giratina-vstar-jumbo-oversized-131-sm-black-star-promos_homepage.webp"
     },
     {
       "key": "604258_victini-jumbo-oversized-032-bw-black-star-promos.jpg",
       "sources": [
         "public/review/jumbos.json"
       ],
-      "object": null,
-      "objectStore": null,
-      "size": null,
-      "sha256": null
+      "object": "/home/nez/data/pokoin-leftovers/objects/302129_victini-jumbo-oversized-032-bw-black-star-promos.jpg",
+      "objectStore": "nezopt",
+      "size": 65233,
+      "sha256": "e58b7c6757a9698aa61d7e238aeeb10732e9d18344eb6128b643c38f0aa31708",
+      "aliasOf": "302129_victini-jumbo-oversized-032-bw-black-star-promos.jpg"
     },
     {
       "key": "604258_victini-jumbo-oversized-032-bw-black-star-promos_homepage.webp",
       "sources": [
         "public/review/jumbos.json"
       ],
-      "object": null,
-      "objectStore": null,
-      "size": null,
-      "sha256": null
+      "object": "/home/nez/data/pokoin-leftovers/objects/302129_victini-jumbo-oversized-032-bw-black-star-promos_homepage.webp",
+      "objectStore": "nezopt",
+      "size": 23310,
+      "sha256": "eaeec37ca7e4feeed988bf03bc27c269ef01be7e1b06b8f14c1814c2585613a8",
+      "aliasOf": "302129_victini-jumbo-oversized-032-bw-black-star-promos_homepage.webp"
     },
     {
       "key": "65282_espurr-79-214-unbroken-bonds.jpg",
@@ -44267,20 +44265,22 @@
       "sources": [
         "public/review/jumbos.json"
       ],
-      "object": null,
-      "objectStore": null,
-      "size": null,
-      "sha256": null
+      "object": "/home/nez/data/pokoin-leftovers/objects/344953_victini.jpg",
+      "objectStore": "nezopt",
+      "size": 1011028,
+      "sha256": "89b3a72722facd2020d9e22eb8da45a2c0445385d23ee121dff9a4602e782e4a",
+      "aliasOf": "344953_victini.jpg"
     },
     {
       "key": "689906_victini_homepage.webp",
       "sources": [
         "public/review/jumbos.json"
       ],
-      "object": null,
-      "objectStore": null,
-      "size": null,
-      "sha256": null
+      "object": "/home/nez/data/pokoin-leftovers/objects/344953_victini_homepage.webp",
+      "objectStore": "nezopt",
+      "size": 23446,
+      "sha256": "44f5e82d26cca5ac62db5b66addb66a29bcf626e530e0ef159372d635430ed8c",
+      "aliasOf": "344953_victini_homepage.webp"
     },
     {
       "key": "76966_espurr-60-163-battle-styles.jpg",

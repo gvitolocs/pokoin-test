@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,12 @@ import { MEDIA_BASE } from '../src/lib/media.js';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const OUT = join(ROOT, 'media-manifest.json');
+const ALIASES_PATH = join(ROOT, 'media-aliases.json');
+
+function loadAliases() {
+  if (!existsSync(ALIASES_PATH)) return {};
+  return JSON.parse(readFileSync(ALIASES_PATH, 'utf8'));
+}
 
 const NEZOPT_OBJECTS = '/home/nez/data/pokoin-leftovers/objects';
 const PI_OBJECTS = '/srv/pokoin/card-images/objects';
@@ -91,6 +97,7 @@ function topFolder(key) {
 }
 
 async function main() {
+  const aliases = loadAliases();
   console.log('Loading catalog…');
   const catalog = await fetchCatalog();
   console.log('Collecting keys…');
@@ -112,9 +119,14 @@ async function main() {
       if (index >= keys.length) return;
       cursor += 1;
       const key = keys[index];
-      const resolved = resolveSource(key, piPresent);
+      let aliasOf;
+      let resolved = resolveSource(key, piPresent);
+      if (!resolved.path && aliases[key]) {
+        aliasOf = aliases[key];
+        resolved = resolveSource(aliasOf, piPresent);
+      }
       const meta = await fileMeta(resolved);
-      entries[index] = {
+      const row = {
         key,
         sources: [...keyMap.get(key)].sort(),
         object: resolved.path || null,
@@ -122,6 +134,8 @@ async function main() {
         size: meta.size,
         sha256: meta.sha256,
       };
+      if (aliasOf) row.aliasOf = aliasOf;
+      entries[index] = row;
     }
   }
 

@@ -2,9 +2,24 @@ import { createMemo, createSignal, For, onSettled, Show } from 'solid-js';
 import TestDock from '../components/TestDock.jsx';
 import { BoardBar, usePageTitle } from './tools/board.jsx';
 
-import { MEDIA_BASE } from '../lib/media.js';
+import { MEDIA_BASE, rebaseMediaUrl } from '../lib/media.js';
 
 const CATALOG_URL = `${MEDIA_BASE}/poko-video/newpoko/catalog.json`;
+const ARCHIVE_MEDIA_PREFIX = `${MEDIA_BASE}/poko-video/newpoko`;
+
+function rebaseArchiveCatalog(data) {
+  const fromPrefix = data.cdn_prefix;
+  if (!fromPrefix) return data;
+  const groups = (data.groups || []).map((g) => ({
+    ...g,
+    script: g.script ? rebaseMediaUrl(g.script, fromPrefix, ARCHIVE_MEDIA_PREFIX) : g.script,
+    files: (g.files || []).map((f) => ({
+      ...f,
+      src: f.src ? rebaseMediaUrl(f.src, fromPrefix, ARCHIVE_MEDIA_PREFIX) : f.src,
+    })),
+  }));
+  return { ...data, groups };
+}
 
 /** newPoko Gemini Fenrir voice archive — dataset phrases + remade episode lines.
  * */
@@ -24,8 +39,9 @@ export default function PokoArchive() {
       })
       .then((data) => {
         if (cancelled) return;
-        setCatalog(() => data);
-        setGroupId(data.groups?.[0]?.id || '');
+        const rebased = rebaseArchiveCatalog(data);
+        setCatalog(() => rebased);
+        setGroupId(rebased.groups?.[0]?.id || '');
       })
       .catch((e) => {
         if (!cancelled) setError(String(e.message || e));
