@@ -67,6 +67,30 @@ export function blocksFor(tests) {
 
 export const POKO_TESTS = [
   video({
+    id: 'ep8-music-a',
+    date: '2026-10-15',
+    title: 'Part 8 · music test A · Eternal Hope',
+    src: `${MEDIA_BASE}/poko-video/ep8/music-test-20261015/ep8_music_A_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/lugia-v2-20261015/ep8.jpg`,
+    note: 'Same video and voice; only the music changes. Kevin MacLeod (incompetech.com), CC BY 4.0.',
+  }),
+  video({
+    id: 'ep8-music-b',
+    date: '2026-10-15',
+    title: 'Part 8 · music test B · Frozen Star → Eternal Hope → Americana',
+    src: `${MEDIA_BASE}/poko-video/ep8/music-test-20261015/ep8_music_B_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/lugia-v2-20261015/ep8.jpg`,
+    note: 'Same video and voice; only the music changes. Kevin MacLeod (incompetech.com), CC BY 4.0.',
+  }),
+  video({
+    id: 'ep8-music-c',
+    date: '2026-10-15',
+    title: 'Part 8 · music test C · Enchanted Journey → Thaxted (Holst)',
+    src: `${MEDIA_BASE}/poko-video/ep8/music-test-20261015/ep8_music_C_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/lugia-v2-20261015/ep8.jpg`,
+    note: 'Same video and voice; only the music changes. Kevin MacLeod (incompetech.com), CC BY 4.0.',
+  }),
+  video({
     id: 'ep8-lugia-v2',
     date: '2026-10-15',
     title: 'Part 8 · Lugia: the card that never gives up · full episode v2 · voxel Lugia + library music',

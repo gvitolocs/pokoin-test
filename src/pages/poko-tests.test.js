@@ -4,6 +4,9 @@ import { MEDIA_BASE } from '../lib/media.js';
 import { POKO_TESTS, testsByMonth } from './poko-tests.js';
 
 const OCTOBER_IDS = [
+  'ep8-music-a',
+  'ep8-music-b',
+  'ep8-music-c',
   'ep8-lugia-v2',
   'ep8-voxkit-opening',
   'ep8-lugia',
@@ -44,7 +47,7 @@ test('months are newest first and October holds the new tests', () => {
   for (const id of OCTOBER_IDS) assert.ok(ids.includes(id), id);
   const dates = october.tests.map((entry) => entry.date);
   assert.deepEqual(dates, dates.slice().sort((a, b) => b.localeCompare(a)));
-  assert.equal(october.tests[0].id, 'ep8-lugia-v2');
+  assert.equal(october.tests[0].id, 'ep8-music-a');
   const lora1 = october.tests.find((entry) => entry.id === 'cb-lora1');
   const lora2 = october.tests.find((entry) => entry.id === 'cb-lora2');
   assert.equal(lora1.clips.length, 14);
