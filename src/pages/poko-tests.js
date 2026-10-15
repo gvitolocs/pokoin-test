@@ -70,8 +70,8 @@ export const POKO_TESTS = [
     id: 'ep8-wings',
     date: '2026-10-15',
     title: 'Part 8 · opening · the wings: little Lugia pops in, the big one keeps sleeping',
-    src: `${MEDIA_BASE}/poko-video/ep8/wings-20261015/lugia-opening-wings-720p.mp4`,
-    poster: `${MEDIA_BASE}/poko-video/ep8/wings-20261015/lugia-opening-wings-poster.jpg`,
+    src: `${MEDIA_BASE}/poko-video/ep8/wings-20261015b/lugia-opening-wings-720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/wings-20261015b/lugia-opening-wings-poster.jpg`,
     note: 'On “wings look like two giant hands,” a sprite voxel Lugia in a glass orb shows the wide wings (slow flap + glow on “hands”); the game-model sleeper stays curled with Z’s. Music: test A bed (Eternal Hope, Kevin MacLeod, CC BY 4.0).',
   }),
   video({
