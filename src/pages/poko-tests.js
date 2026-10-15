@@ -67,6 +67,14 @@ export function blocksFor(tests) {
 
 export const POKO_TESTS = [
   video({
+    id: 'ep8-swim',
+    date: '2026-10-15',
+    title: 'Part 8 · opening · Lugia swims under the boat (new swim pose)',
+    src: `${MEDIA_BASE}/poko-video/ep8/swim-20261015/lugia-opening-swim-720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/swim-20261015/lugia-opening-swim-poster.jpg`,
+    note: 'Cold-open shadow: side-profile swim voxel (wings folded, head left), ~15° head-down tilt on the glide. Music: library bed (Eternal Hope, Kevin MacLeod, CC BY 4.0), first 45.625 s.',
+  }),
+  video({
     id: 'ep8-wings',
     date: '2026-10-15',
     title: 'Part 8 · opening · the wings: little Lugia pops in, the big one keeps sleeping',
