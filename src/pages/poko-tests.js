@@ -67,6 +67,14 @@ export function blocksFor(tests) {
 
 export const POKO_TESTS = [
   video({
+    id: 'ep8-opening-v3',
+    date: '2026-10-15',
+    title: 'Part 8 · opening v3 · all Lugia fixes so far (swim silhouette, curled sleeper, wings bubble, Game Boy sprite)',
+    src: `${MEDIA_BASE}/poko-video/ep8/opening-v3-20261015/lugia-opening-v3-720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/opening-v3-20261015/lugia-opening-v3.jpg`,
+    note: 'Lugia swims under the boat in your reference pose; sleeps curled on the sand; a little sprite Lugia shows the wings; the Game Boy shows the real Gold/Silver sprite. Music: the library mix you picked.',
+  }),
+  video({
     id: 'ep8-swim',
     date: '2026-10-15',
     title: 'Part 8 · opening · Lugia swims under the boat (new swim pose)',
