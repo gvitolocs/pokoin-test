@@ -67,6 +67,14 @@ export function blocksFor(tests) {
 
 export const POKO_TESTS = [
   video({
+    id: 'ep8-lugia-final',
+    date: '2026-10-15',
+    title: 'Part 8 · Lugia: the card that never gives up · FINAL CUT for your OK (6:08)',
+    src: `${MEDIA_BASE}/poko-video/ep8/lugia-v5-20261015/poko_lugia_never_gives_up_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep8/lugia-v5-20261015/ep8.jpg`,
+    note: 'Final script (one story, no questions, no COMEBACK labels): the storm legend, the movie birds, the Silver box, Crystal Lugia, L-B-S, the LEGEND puzzle, the Lost Zone, Pokémon GO, Archeops from a fossil, the Crystal reprint, the sleeve. New Qwen voice and your library music mix. Flying Lugia is the pixel voxel Lugia again; the curled sleeper, wings bubble, Game Boy sprite and swim silhouette are kept.',
+  }),
+  video({
     id: 'ep8-opening-v4',
     date: '2026-10-15',
     title: 'Part 8 · opening v4 · straight swim silhouette, curled sleeper, wings bubble, Game Boy sprite',
