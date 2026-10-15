@@ -7,6 +7,7 @@ const OCTOBER_IDS = [
   'ep8-music-a',
   'ep8-music-b',
   'ep8-music-c',
+  'ep8-music-d',
   'ep8-lugia-v2',
   'ep8-voxkit-opening',
   'ep8-lugia',
