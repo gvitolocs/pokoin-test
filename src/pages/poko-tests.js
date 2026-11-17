@@ -67,6 +67,14 @@ export function blocksFor(tests) {
 
 export const POKO_TESTS = [
   video({
+    id: 'ep10-three-boxes-review',
+    date: '2026-11-17',
+    title: 'The Mystery of the Three Pokémon Boxes · review cut',
+    src: `${MEDIA_BASE}/poko-video/ep10/three-boxes-20261117/poko_three_boxes_720p.mp4`,
+    poster: `${MEDIA_BASE}/poko-video/ep10/three-boxes-20261117/ep10.jpg`,
+    note: 'Review cut of Part 10: the three-box mystery story, new voice and music mix. Not on YouTube yet.',
+  }),
+  video({
     id: 'ep8-lugia-final',
     date: '2026-10-15',
     title: 'Part 8 · Lugia: the card that never gives up · final cut · on YouTube (6:08)',
