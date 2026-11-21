@@ -39,6 +39,12 @@ PUBLIC_BASE="https://test-media.pokoin.com"
 OBJECTS="${POKOIN_OBJECTS:-/home/nez/data/pokoin-leftovers/objects}"
 PI_OBJECTS="/srv/pokoin/card-images/objects"
 PI_HOST="${POKOIN_MEDIA_FALLBACK_HOST:-}"
+# the host reaches ssh and scp as one argument, so it must not start with a dash nor hold a space or
+# another shell character; nothing is looked up before it is accepted
+if [[ -n "$PI_HOST" && ! "$PI_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]]; then
+  echo "invalid POKOIN_MEDIA_FALLBACK_HOST" >&2
+  exit 2
+fi
 WRANGLER="${WRANGLER:-$HOME/.bun/bin/wrangler}"
 PARALLEL="${PARALLEL:-8}"
 FORCE="${FORCE:-0}"
@@ -64,6 +70,13 @@ if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
 fi
 
 touch "$DONE"
+
+# the keys with no source are found by the xargs children, which share no variable with this shell,
+# so each of them appends to a file in a private temporary directory
+WORK="$(mktemp -d -p "${TMPDIR:-/tmp}" "upload-media-r2.XXXXXX")"
+trap 'rm -rf -- "${WORK}"' EXIT
+SKIP_LIST="${WORK}/no-source"
+export SKIP_LIST
 
 if [[ -n "${KEYS_FILE:-}" ]]; then
   mapfile -t KEYS < <(grep -v '^[[:space:]]*$' "$KEYS_FILE" | grep -v '^#')
@@ -108,10 +121,10 @@ resolve_file() {
     printf '%s' "$path"
     return 0
   fi
-  if [[ -n "$PI_HOST" ]] && ssh -o BatchMode=yes -o ConnectTimeout=10 "${PI_HOST}" "test -f ${PI_OBJECTS}/${key}" 2>/dev/null; then
+  if [[ -n "$PI_HOST" ]] && ssh -o BatchMode=yes -o ConnectTimeout=10 -- "${PI_HOST}" "test -f ${PI_OBJECTS}/${key}" 2>/dev/null; then
     local tmp
     tmp="$(mktemp -p "${TMPDIR:-/tmp}" "$(basename "$key").XXXXXX")"
-    scp -q "${PI_HOST}:${PI_OBJECTS}/${key}" "$tmp"
+    scp -q -- "${PI_HOST}:${PI_OBJECTS}/${key}" "$tmp"
     printf '%s' "$tmp"
     return 0
   fi
@@ -132,10 +145,12 @@ upload_one() {
       source_key="$alias"
       if ! file="$(resolve_file "$source_key")"; then
         echo "skip (no source or alias): $key (alias $alias)" >&2
+        printf '%s\n' "$key" >> "$SKIP_LIST"
         return 0
       fi
     else
       echo "skip (no source): $key" >&2
+      printf '%s\n' "$key" >> "$SKIP_LIST"
       return 0
     fi
   fi
@@ -160,7 +175,7 @@ upload_one() {
   fi
 }
 
-export BUCKET DONE OBJECTS PI_HOST PI_OBJECTS WRANGLER FORCE
+export ALIASES BUCKET DONE OBJECTS PI_HOST PI_OBJECTS WRANGLER FORCE
 export -f resolve_file upload_one alias_for content_type_for
 
 echo "Uploading with $WRANGLER (parallel ${PARALLEL})…"
@@ -182,3 +197,38 @@ const pick = keys.filter((_, i) => i % Math.max(1, Math.floor(keys.length / ${SA
 "
 
 echo "Done. Uploaded keys recorded in ${DONE}"
+
+# the manifest is the record of what the generator found on neither store: a row with no object and
+# no alias is a key this run cannot be expected to upload, so it is counted apart
+NULL_OBJECT="${WORK}/no-object-in-manifest"
+node -e "
+const m = JSON.parse(require('fs').readFileSync('${MANIFEST}', 'utf8'));
+for (const e of m.entries) if (e.object === null && !e.aliasOf) console.log(e.key);
+" > "$NULL_OBJECT"
+
+SKIPPED=0
+NO_OBJECT=0
+if [[ -s "$SKIP_LIST" ]]; then
+  while IFS= read -r skipped_key; do
+    if grep -Fxq -- "$skipped_key" "$NULL_OBJECT"; then
+      NO_OBJECT=$((NO_OBJECT + 1))
+    else
+      SKIPPED=$((SKIPPED + 1))
+    fi
+  done < "$SKIP_LIST"
+fi
+if (( NO_OBJECT > 0 )); then
+  if (( NO_OBJECT == 1 )); then
+    echo "1 key has no object in the manifest" >&2
+  else
+    echo "$NO_OBJECT keys have no object in the manifest" >&2
+  fi
+fi
+if (( SKIPPED > 0 )); then
+  if (( SKIPPED == 1 )); then
+    echo "1 key skipped: no source" >&2
+  else
+    echo "$SKIPPED keys skipped: no source" >&2
+  fi
+  exit 3
+fi

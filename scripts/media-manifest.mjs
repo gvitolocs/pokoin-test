@@ -27,6 +27,12 @@ function loadAliases() {
 const LOCAL_OBJECTS = '/home/nez/data/pokoin-leftovers/objects';
 const PI_OBJECTS = '/srv/pokoin/card-images/objects';
 const PI_HOST = process.env.POKOIN_MEDIA_FALLBACK_HOST || '';
+// the host reaches ssh as one argument, so it must not start with a dash nor hold a space or
+// another shell character; nothing is looked up before it is accepted
+if (PI_HOST && !/^[A-Za-z0-9][A-Za-z0-9._@:-]*$/.test(PI_HOST)) {
+  console.error('invalid POKOIN_MEDIA_FALLBACK_HOST');
+  process.exit(2);
+}
 const LEGACY_CATALOG = 'https://cdn.pokoin.com/poko-video/newpoko/catalog.json';
 
 async function fetchCatalog() {
@@ -57,7 +63,7 @@ function piKeysPresent(keys) {
   if (!PI_HOST || !keys.length) return Promise.resolve(new Set());
   const script = `cd ${PI_OBJECTS} && while IFS= read -r k; do test -f "$k" && printf '%s\\n' "$k"; done`;
   return new Promise((resolve) => {
-    const child = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', PI_HOST, script], {
+    const child = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--', PI_HOST, script], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
