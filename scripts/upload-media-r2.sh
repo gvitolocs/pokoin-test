@@ -17,8 +17,9 @@
 # A key the file or the manifest names twice is uploaded once: the list is deduped before the keys go
 # out, so what the run handed out and what it got reports about are the same set. The blanks in front
 # of a key come off before that, so a key and the same key with spaces in front of it are one key.
-# A key that is not one name under the object directory -- it holds "..", starts with "/", or carries
-# a control character -- is refused where it stands, never looked up, and counted as a failed key.
+# A key that is not one name under the object directory -- one of its components is "..", it starts
+# with "/", or it carries a control character -- is refused where it stands, never looked up, and
+# counted as a failed key. Two dots inside a name are part of that name and a key like any other.
 set -euo pipefail
 
 # --- credentials loader: begin
@@ -165,9 +166,16 @@ content_type_for() {
 # the store, or that runs over two lines is a bad record and not a missing object: it is refused here,
 # before the path is built out of it and before the store, the done list or the fallback host is
 # looked at, and its control characters are shown rather than written.
+#
+# Reaching above the store is a step of its own, and only such a step: the key is "..", one of its
+# components is, or it starts with one. Two dots inside a name are part of that name -- a..b.png and
+# v1..v2.webp are keys this store holds -- so the four shapes are matched one by one instead of ".."
+# anywhere in the string. The middle one spells its dots as bracket classes: an unquoted ".." between
+# two stars does not match a parent step, whatever it looks like it should match.
 key_is_bad() {
   local key="$1"
-  if [[ "$key" == *..* || "$key" == /* || "$key" == *[[:cntrl:]]* ]]; then
+  if [[ "$key" == /* || "$key" == *[[:cntrl:]]* || "$key" == .. || "$key" == ../* \
+    || "$key" == */.. || "$key" == */[.][.]/* ]]; then
     printf 'invalid key (skipped): %s\n' "${key//[[:cntrl:]]/?}" >&2
     return 0
   fi
