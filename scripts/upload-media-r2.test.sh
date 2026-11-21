@@ -793,20 +793,20 @@ fi
 
 # s17 (e). the HEAD sample at the end of the run fails after uploads that all worked: the count
 #          lines are already printed when the sample is attempted, the run still says Done, and the
-#          status is the sample's own, 1, because nothing of a higher code happened. A key the
-#          committed manifest gives no object reports itself but costs nothing, which is what keeps
-#          this run above the 0 of a clean one.
+#          status is the one a sample fetch costs, 5, because nothing of a higher code happened. A
+#          key the committed manifest gives no object reports itself but costs nothing, which is
+#          what keeps this run above the 0 of a clean one.
 fb_keys good.png nothing.png
 fb_store good.png
 fb_manifest good.png "/store/good.png" - nothing.png - -
 fail_keys
 run_fb s17 FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
 err_last="$(printf '%s\n' "$ERR" | tail -1)"
-if [[ "$STATUS" -eq 1 ]] \
+if [[ "$STATUS" -eq 5 ]] \
   && [[ "$err_last" == "$(line_for 1 'key has no object in the manifest' 'keys have no object in the manifest')" ]] \
   && [[ "$ERR" == *"skip (no source): nothing.png"* ]] && [[ "$ERR" != *"failed"* ]] \
   && [[ "$WR_CALLS" -eq 1 ]] && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
-  ok "s17 (e): a failing sample fetch after good uploads: the count line precedes it, the run still says Done, exit 1"
+  ok "s17 (e): a failing sample fetch after good uploads: the count line precedes it, the run still says Done, exit 5"
 else
   bad "s17: status=$STATUS err_last=[$err_last] wrangler=$WR_CALLS out=[$OUT] err=[$ERR]"
 fi
@@ -866,12 +866,27 @@ run_fb s18 PARALLEL=1 UNRECORDABLE_KEY=bad.png
 DONE_ROWS="$(done_list | tr '\n' '|')"
 if [[ "$STATUS" -eq 4 ]] \
   && [[ "$ERR" == *"upload failed: bad.png"* ]] \
+  && [[ "$ERR" == *"cannot record result for: bad.png"* ]] \
   && [[ "$ERR" == *"$(unaccounted_line 2)"* ]] \
   && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] \
   && [[ "$DONE_ROWS" == "good.png|" ]]; then
-  ok "s18 (a): a failure record that cannot be written: the key is counted unaccounted, the counts and Done print, exit 4"
+  ok "s18 (a): a failure record that cannot be written: the child says so, the key is counted unaccounted, the counts and Done print, exit 4"
 else
   bad "s18: status=$STATUS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+
+# s18b. the same with one key only, which is the singular of the unaccounted line.
+fb_keys bad.png
+fb_store bad.png
+fb_manifest bad.png "/store/bad.png" -
+fail_keys
+run_fb s18b PARALLEL=1 UNRECORDABLE_KEY=bad.png
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$ERR" == *"$(unaccounted_line 1)"* ]] && [[ "$ERR" != *"$(unaccounted_line 2)"* ]] \
+  && [[ "$ERR" == *"cannot record result for: bad.png"* ]]; then
+  ok "s18b: one key that recorded nothing prints [$(unaccounted_line 1)], not the plural"
+else
+  bad "s18b: status=$STATUS out=[$OUT] err=[$ERR]"
 fi
 
 # s19 (b). the child of one key exits 255, which makes xargs stop there: the keys after it were
@@ -932,6 +947,86 @@ if [[ "$STATUS" -eq 4 ]] && [[ "$err_script" == "$want_err" ]] \
   ok "s21 (d): the counts of an ordinary run are exactly the PK-C043 ones, with no unaccounted line and exit 4"
 else
   bad "s21: status=$STATUS err=[$err_script] want=[$want_err] done=[$DONE_ROWS] out=[$OUT]"
+fi
+
+# ---------------------------------------------------------------------------
+# s22..s24: the done list. A key is looked up in it as data, never as an option (s22), and a forced
+# run rewrites it: the children of that run used to share one temporary file, so eight of them
+# rewriting the list at once lost keys that had never been touched (s24). s23 is the end state a
+# forced run has to give, which the old code already gave as long as one child ran at a time.
+# ---------------------------------------------------------------------------
+
+# force_keys: the eight keys of the forced runs, in the store and in the fixture manifest
+force_rows=()
+force_keys=()
+for i in 1 2 3 4 5 6 7 8; do
+  force_keys+=("k$i.png")
+  force_rows+=("k$i.png" "/store/k$i.png" "-")
+done
+force_store() {
+  rm -f "$TMP/objects2"/*
+  local k
+  for k in "${force_keys[@]}"; do printf x > "$TMP/objects2/$k"; done
+}
+
+# s22. a key whose name starts with a dash is already recorded: the lookup is a data lookup, so the
+#      key is not uploaded again and its row is not written twice.
+fb_keys '-c.png'
+fb_store '-c.png'
+fb_manifest '-c.png' "/store/-c.png" -
+fail_keys
+printf '%s\n' '-c.png' > "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s22 PARALLEL=1
+FB_KEEP_DONE=''
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] && [[ -z "$ERR" ]] \
+  && [[ "$DONE_ROWS" == "-c.png|" ]]; then
+  ok "s22: a key whose name starts with a dash is looked up in the done list as data: not uploaded, recorded once"
+else
+  bad "s22: status=$STATUS wrangler=$WR_CALLS done=[$DONE_ROWS] err=[$ERR]"
+fi
+
+# s23. FORCE=1 over two keys, one of them recorded twice: both go up, and the list holds every key
+#      once, the re-uploaded ones last.
+fb_keys k1.png k2.png
+force_store
+fb_manifest k1.png "/store/k1.png" - k2.png "/store/k2.png" -
+fail_keys
+printf '%s\n' other.png k1.png k1.png > "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s23 PARALLEL=1 FORCE=1
+FB_KEEP_DONE=''
+want_done="$(printf '%s\n' other.png k1.png k2.png)"
+DONE_ROWS="$(cat "$TMP/root/.media-upload.done")"
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 2 ]] && [[ "$DONE_ROWS" == "$want_done" ]]; then
+  ok "s23: FORCE over a recorded key: it uploads again and the done list holds each key once, the forced ones last"
+else
+  bad "s23: status=$STATUS wrangler=$WR_CALLS done=[$(printf '%s\n' "$DONE_ROWS" | tr '\n' '|')] err=[$ERR]"
+fi
+
+# s24. the same with eight forced keys and two hundred rows the run never touches, all eight children
+#      at once: every key of the list is still there, once each. One shared temporary file for the
+#      rewrite is how PK-C043 lost rows of it.
+fb_keys "${force_keys[@]}"
+force_store
+fb_manifest "${force_rows[@]}"
+fail_keys
+{
+  for i in $(seq 1 200); do printf 'fill%s.png\n' "$i"; done
+  for k in "${force_keys[@]}"; do printf '%s\n' "$k"; done
+} > "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s24 FORCE=1 PARALLEL=8
+FB_KEEP_DONE=''
+done_rows="$(grep -c . "$TMP/root/.media-upload.done" || true)"
+done_dups="$(sort "$TMP/root/.media-upload.done" | uniq -d | grep -c '' || true)"
+done_fill="$(grep -c '^fill' "$TMP/root/.media-upload.done" || true)"
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 8 ]] \
+  && [[ "$done_rows" -eq 208 ]] && [[ "$done_dups" -eq 0 ]] && [[ "$done_fill" -eq 200 ]]; then
+  ok "s24: eight forced children leave the two hundred rows they were never given: 208 rows, none twice"
+else
+  bad "s24: status=$STATUS wrangler=$WR_CALLS rows=$done_rows dups=$done_dups fill=$done_fill err=[$ERR]"
 fi
 fail_keys
 

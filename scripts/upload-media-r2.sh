@@ -147,7 +147,7 @@ record_result() {
 
 upload_one() {
   local key="$1"
-  if [[ "$FORCE" != "1" ]] && grep -Fxq "$key" "$DONE" 2>/dev/null; then
+  if [[ "$FORCE" != "1" ]] && grep -Fxq -- "$key" "$DONE" 2>/dev/null; then
     record_result ok "$key"
     return
   fi
@@ -189,10 +189,6 @@ upload_one() {
     record_result fail "$key"
     return
   fi
-  if [[ "$FORCE" == "1" ]]; then
-    grep -Fxv "$key" "$DONE" > "${DONE}.tmp" 2>/dev/null || true
-    mv "${DONE}.tmp" "$DONE"
-  fi
   echo "$key" >> "$DONE"
   [[ -n "$tmp_cleanup" ]] && rm -f "$tmp_cleanup"
   if [[ "$source_key" != "$key" ]]; then
@@ -211,6 +207,14 @@ echo "Uploading with $WRANGLER (parallel ${PARALLEL})…"
 XARGS_STATUS=0
 printf '%s\n' "${KEYS[@]}" | xargs -P "$PARALLEL" -I {} bash -c 'upload_one "$@"' _ {} \
   || XARGS_STATUS=$?
+
+# a forced key is recorded once, at the end of the done list: the children only append to it, and the
+# row that stays is the last copy of each key, so what the whole list is left holding is every key
+# once. Two children rewriting it through one shared temporary file used to lose rows of keys they
+# were never given.
+if [[ "$FORCE" == "1" ]]; then
+  tac "$DONE" | awk '!seen[$0]++' | tac > "${DONE}.tmp" && mv "${DONE}.tmp" "$DONE"
+fi
 
 # the manifest is the record of what the generator found on neither store: a row with no object and
 # no alias is a key this run cannot be expected to upload, so it is counted apart. The three counts
@@ -298,12 +302,13 @@ echo "Done. Uploaded keys recorded in ${DONE}"
 
 # the exit code of a run, in the order of what it means: 4 for a key whose upload failed, for a key
 # that recorded nothing, and for an xargs run that stopped before the end of the list; 3 for a key
-# the manifest gives a source; the sample's own status when the fetch did not come back; and 0 when
-# none of these applies, which is the status of an if that took no branch
+# the manifest gives a source; 5 for the HEAD sample that did not come back; and 0 when none of these
+# applies, which is the status of an if that took no branch. The 1 of a preflight check and the 2 of
+# an unusable fallback host are long gone by here.
 if (( FAILED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 )); then
   exit 4
 elif (( SKIPPED > 0 )); then
   exit 3
 elif (( SAMPLE_STATUS != 0 )); then
-  exit "$SAMPLE_STATUS"
+  exit 5
 fi
