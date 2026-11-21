@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
 # Upload media-manifest.json objects to R2 from nezopt (local object store + pi-home fallback).
-# Requires: ~/.bun/bin/wrangler with CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (use `bash -ic` if needed).
+# Sources ~/.config/pokoin/cloudflare.env when it is readable and LANE_WORKER is unset (its values replace exported ones); needs ~/.bun/bin/wrangler.
 # Do not run in CI without intent — this pushes to pokoin-test-media.
 #
 # Optional:
 #   KEYS_FILE=path   — upload only keys listed in the file (one per line), ignoring the done-list unless FORCE=1
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
 set -euo pipefail
+
+# Source the credentials file when it is readable and LANE_WORKER is unset; its values replace
+# already exported ones. All shell options are restored after the source.
+_cf_env="${HOME:-}/.config/pokoin/cloudflare.env"
+if [[ -z "${LANE_WORKER:-}" && -f "$_cf_env" && -r "$_cf_env" ]]; then
+  _cf_opts=$(set +o)
+  # the substitution does not report errexit, so it is added to the snapshot
+  case $- in *e*) _cf_opts="${_cf_opts}"$'\n'"set -o errexit" ;; esac
+  set +eu
+  set -a
+  # shellcheck disable=SC1090
+  . "$_cf_env" >/dev/null 2>&1 || true
+  { eval "$_cf_opts"; } 2>/dev/null
+  unset _cf_opts
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="${ROOT}/media-manifest.json"
@@ -28,6 +43,16 @@ fi
 
 if [[ ! -x "$WRANGLER" ]]; then
   echo "Wrangler not found at $WRANGLER" >&2
+  exit 1
+fi
+
+if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+  if [[ -n "${LANE_WORKER:-}" ]]; then
+    _cf_where="credentials file not read because LANE_WORKER is set"
+  else
+    _cf_where="looked in ${_cf_env}"
+  fi
+  echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set (${_cf_where})" >&2
   exit 1
 fi
 
