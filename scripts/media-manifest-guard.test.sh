@@ -686,9 +686,12 @@ else
     bad "g19: git ls-tree named no file of $HERE"
   else
     mode_problems=0
+    # the row is "mode type sha<TAB>path", and the separator is named rather than typed: a file
+    # of this repository holds no invisible byte
+    mode_tab=$'\t'
     while IFS= read -r mode_row; do
       mode_value="${mode_row%% *}"
-      mode_path="${mode_row##*	}"
+      mode_path="${mode_row##*"$mode_tab"}"
       case "$mode_path" in
         *.sh)
           if [[ "$mode_value" != "100755" ]]; then
