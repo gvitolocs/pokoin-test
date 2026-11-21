@@ -3,6 +3,9 @@
 # Sources ~/.config/pokoin/cloudflare.env when it is readable and LANE_WORKER is unset (its values replace exported ones), then restores the set -o and shopt options; needs ~/.bun/bin/wrangler.
 # Do not run in CI without intent — this pushes to pokoin-test-media.
 #
+# Required:
+#   POKOIN_OBJECTS=path -- the directory that holds the media objects; the manifest gives every key
+#     relative to it. Unset or empty, the script says so and ends 2 before it looks at anything else.
 # Optional:
 #   KEYS_FILE=path   — upload only keys listed in the file (one per line), ignoring the done-list unless FORCE=1
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
@@ -38,13 +41,19 @@ ALIASES="${ROOT}/media-aliases.json"
 DONE="${ROOT}/.media-upload.done"
 BUCKET="pokoin-test-media"
 PUBLIC_BASE="https://test-media.pokoin.com"
-OBJECTS="${POKOIN_OBJECTS:-/home/nez/data/pokoin-leftovers/objects}"
+OBJECTS="${POKOIN_OBJECTS:-}"
 PI_OBJECTS="/srv/pokoin/card-images/objects"
 PI_HOST="${POKOIN_MEDIA_FALLBACK_HOST:-}"
 # the host reaches ssh and scp as one argument, so it must not start with a dash nor hold a space or
 # another shell character; nothing is looked up before it is accepted
 if [[ -n "$PI_HOST" && ! "$PI_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]]; then
   echo "invalid POKOIN_MEDIA_FALLBACK_HOST" >&2
+  exit 2
+fi
+# the store is where the operator keeps it, and the tree holds no guess at it: the run that was not
+# told does not look around for one
+if [[ -z "$OBJECTS" ]]; then
+  echo "set POKOIN_OBJECTS to the directory that holds the media objects" >&2
   exit 2
 fi
 WRANGLER="${WRANGLER:-$HOME/.bun/bin/wrangler}"
@@ -352,7 +361,8 @@ echo "Done. Uploaded keys recorded in ${DONE}"
 # xargs run that stopped before the end of the list, and for the two steps that read or rewrite what
 # the counts are made of; 3 for a key the manifest gives a source; 5 for the HEAD sample that did not
 # come back; and 0 when none of these applies, which is the status of an if that took no branch. The
-# 1 of a preflight check and the 2 of an unusable fallback host are long gone by here.
+# 1 of a preflight check and the 2 of an unusable fallback host or of an object directory the run was
+# not given are long gone by here.
 if (( FAILED > 0 || NOTRECORDED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 \
       || MANIFEST_ROWS_STATUS != 0 || REWRITE_STATUS != 0 )); then
   exit 4
