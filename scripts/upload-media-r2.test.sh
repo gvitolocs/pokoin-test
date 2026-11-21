@@ -338,6 +338,13 @@ log="$SSH_LOG"
 [ "$(basename "$0")" = scp ] && log="$SCP_LOG"
 printf -- '---\n' >> "$log"
 for a in "$@"; do printf '%s\n' "$a" >> "$log"; done
+# SSH_MISS=<text>: the host says no to a path holding this text, so a case can have the keys it names
+# fall through to the alias map and still count what the run asked the host about.
+if [ -n "${SSH_MISS:-}" ]; then
+  case "$*" in
+    *"$SSH_MISS"*) exit 1 ;;
+  esac
+fi
 exit 0
 STUB
 cp "$S2/ssh" "$S2/scp"
@@ -477,6 +484,7 @@ run_fb() {
     WRANGLER="$S2/wrangler" POKOIN_OBJECTS="$TMP/objects2" KEYS_FILE="$FB_KEYS" \
     POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS" \
     SSH_LOG="$SSH_LOG" SCP_LOG="$SCP_LOG" CALLS2="$CALLS2" REAL_NODE="$REAL_NODE" \
+    SSH_MISS="${SSH_MISS:-}" \
     "$@" bash "$TMP/root/scripts/upload-media-r2.sh" >"$TMP/out2" 2>"$TMP/err2"
   STATUS=$?
   set -e
@@ -1663,6 +1671,51 @@ if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 0"* ]] \
   ok "s37c (item B): a keys file that holds one blank line only is a run with nothing to do: 0 keys, exit 0, nothing on stderr"
 else
   bad "s37c: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s38 (item C). an alias target is a key like any other, and the child builds a path out of it once the
+#               requested key is not on the store: a target that is a path above the store is refused
+#               where a key of its own would be, before that path is built, before the store or the host
+#               is asked for it, and the requested key is a failed key rather than a missing one. The
+#               good alias beside it goes on working.
+fb_keys bad1.png good1.png
+fb_store present.png
+fb_manifest bad1.png "/store/bad1.png" - good1.png "/store/good1.png" -
+FB_ALIASES='{"bad1.png":"../x.png","good1.png":"present.png"}'
+# the host holds neither key, so both fall through to the alias map and the only thing left to see is
+# what the run asks the host about for a target
+SSH_MISS='.png'
+run_fb s38 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+FB_ALIASES=''
+SSH_MISS=''
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+if [[ "$STATUS" -eq 4 ]] && grep -Fq -- 'invalid key (skipped): ../x.png' "$TMP/err2" \
+  && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/good1\.png' "$CALLS2" \
+  && [[ "$err_last" == "$(line_for 1 'key failed to upload' 'keys failed to upload')" ]] \
+  && [[ "$ERR" != *"skip (no source or alias)"* ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$(done_list)" == "good1.png" ]]; then
+  ok "s38 (item C): an alias target that is a path: refused, one ssh call for the key itself and none for the target, [$(line_for 1 'key failed to upload' 'keys failed to upload')] and exit 4"
+else
+  bad "s38: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS last=[$err_last] done=[$(done_list)] calls=[$(tr '\n' '|' < "$CALLS2" 2>/dev/null)] err=[$ERR]"
+fi
+
+# s38b (item C). a target with a parent step inside it is the same refusal, and a name under the store
+#                is untouched by it: the check is on the shape of the target, not on the alias path
+fb_keys bad1.png good1.png
+fb_store present.png
+fb_manifest bad1.png "/store/bad1.png" - good1.png "/store/good1.png" -
+FB_ALIASES='{"bad1.png":"a/../b.png","good1.png":"present.png"}'
+SSH_MISS='.png'
+run_fb s38b POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+FB_ALIASES=''
+SSH_MISS=''
+if [[ "$STATUS" -eq 4 ]] && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$SCP_CALLS" -eq 0 ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && grep -Fq -- 'invalid key (skipped): a/../b.png' "$TMP/err2" \
+  && [[ "$(done_list)" == "good1.png" ]]; then
+  ok "s38b (item C): a target with a parent step inside it is refused the same way, one step before any lookup"
+else
+  bad "s38b: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS done=[$(done_list)] err=[$ERR]"
 fi
 
 # s12. the repository-wide check runs as a step of this suite, so its failure fails the suite
