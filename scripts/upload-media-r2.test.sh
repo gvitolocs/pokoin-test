@@ -23,8 +23,9 @@ cat > "$TMP/stubs/wrangler" <<STUB
 #!/bin/sh
 if [ -n "\${CLOUDFLARE_API_TOKEN:-}" ]; then s=token-set; else s=token-unset; fi
 if [ "\${CLOUDFLARE_API_TOKEN:-}" = "dummy-token-for-test" ]; then v=value-from-file; else v=value-other; fi
-echo "\$s \$v \$*" >> "$CALLS"
-[ "\${FAIL_WRANGLER:-}" = 1 ] && exit 1
+m=\$(env | grep -c "^MANIFEST=" || true)
+echo "\$s \$v manifest-exported=\$m \$*" >> "$CALLS"
+# wrangler runs in the xargs child where errexit is never on, so only a failing node stub shows it
 exit 0
 STUB
 printf "#!/bin/sh\n[ \"\${NODE_FAIL:-}\" = 1 ] && exit 1\nexit 0\n" > "$TMP/stubs/node"
@@ -142,15 +143,39 @@ else
   bad "h: status=$STATUS err=[$ERR]"
 fi
 
-# i. the credentials file runs set +e: errexit stays on (a failing node stub at the end stops the
-#    script before the final line)
+# i. the credentials file runs set +e: errexit stays on. The run reaches the upload (wrangler stub
+#    called, no preflight text), and a failing node stub at the end stops the script before the
+#    final line.
 H="$(mk_home home-i)"
 write_creds "$H" "set +e"
 run_case i "$H" NODE_FAIL=1
-if [[ "$STATUS" -ne 0 ]] && ! grep -q "^Done" "$TMP/out"; then
+if [[ "$STATUS" -ne 0 ]] && [[ -e "$CALLS" ]] && [[ "$ERR" != *"must be set"* ]] \
+  && ! grep -q "^Done" "$TMP/out"; then
   ok "i: errexit still on after the credentials file ran set +e"
 else
-  bad "i: status=$STATUS out=[$(cat "$TMP/out")]"
+  bad "i: status=$STATUS err=[$ERR] out=[$(cat "$TMP/out")]"
+fi
+
+# l. allexport is off again after the loader: a variable the script defines is not exported
+H="$(mk_home home-l)"
+write_creds "$H"
+run_case l "$H"
+if [[ "$STATUS" -eq 0 ]] && grep -q " manifest-exported=0 " "$CALLS"; then
+  ok "l: allexport off after the loader"
+else
+  bad "l: status=$STATUS calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# h2. the credentials file sets PS4 and runs set -x: no trace line and no value on stderr
+H="$(mk_home home-h2)"
+write_creds "$H" "PS4=\">>\"" "set -x"
+run_case h2 "$H"
+if [[ "$STATUS" -eq 0 ]] && grep -q "^token-set " "$CALLS" \
+  && ! grep -qF -e "$DUMMY_TOKEN" -e "$DUMMY_ACCOUNT" "$TMP/out" "$TMP/err" \
+  && ! grep -qF ">>" "$TMP/err"; then
+  ok "h2: xtrace with a custom PS4 is not left on"
+else
+  bad "h2: status=$STATUS err=[$ERR]"
 fi
 
 # j. variables exported by the caller are replaced by the values in the file
