@@ -639,7 +639,7 @@ if [[ -e "$TMP/forbidden.calls" ]]; then
   bad "ssh/scp stub was called: $(cat "$TMP/forbidden.calls")"
 fi
 
-# A10: the suite reads the committed manifest and must leave it exactly as HEAD has it
+# the manifest of the repository is left exactly as HEAD has it
 guard_manifest || fail=1
 
 if [[ "$fail" -ne 0 ]]; then
