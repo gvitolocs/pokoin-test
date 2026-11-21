@@ -46,7 +46,7 @@ test.pokoin.com does **not** use pokoin.com’s CDN or Kubernetes. Board media l
 node scripts/media-manifest.mjs
 ```
 
-Upload from nezopt (uses `~/.bun/bin/wrangler`; run in a shell that has `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, e.g. `bash -ic`):
+Upload from nezopt (the script loads the Cloudflare credentials file `~/.config/pokoin/cloudflare.env` itself, where `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` come from, and needs `~/.bun/bin/wrangler`):
 
 ```bash
 ./scripts/upload-media-r2.sh
