@@ -261,6 +261,176 @@ else
   bad "n: out=[$nout]"
 fi
 
+# ---------------------------------------------------------------------------
+# s1…s6: the fallback host and the keys with no source. These cases need ssh and scp to answer, so
+# they run with a second stub directory that records every call instead of the forbidden one above.
+# ---------------------------------------------------------------------------
+S2="$TMP/stubs-fallback"
+mkdir -p "$S2" "$TMP/objects2" "$TMP/home-fb"
+SSH_LOG="$TMP/ssh.args"
+SCP_LOG="$TMP/scp.args"
+CALLS2="$TMP/wrangler2.calls"
+FB_KEYS="$TMP/keys2.txt"
+FB_HOST="fallback.example.invalid"   # a dummy, and not a name that resolves
+REMOTE_OBJECTS="/srv/pokoin/card-images/objects"   # PI_OBJECTS in the script under test
+
+cat > "$S2/ssh" <<'STUB'
+#!/bin/sh
+# one block per call, one argument per line, so a command line can be compared exactly
+log="$SSH_LOG"
+[ "$(basename "$0")" = scp ] && log="$SCP_LOG"
+printf -- '---\n' >> "$log"
+for a in "$@"; do printf '%s\n' "$a" >> "$log"; done
+exit 0
+STUB
+cp "$S2/ssh" "$S2/scp"
+# alias_for prints the answer it is given, so the alias lookup works without a real node
+# shellcheck disable=SC2016
+printf '#!/bin/sh\n[ -n "${STUB_ALIAS:-}" ] && printf "%%s" "$STUB_ALIAS"\nexit 0\n' > "$S2/node"
+cat > "$S2/wrangler" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$CALLS2"
+exit 0
+STUB
+chmod +x "$S2"/*
+
+# fb_keys <key…> / fb_store <key…>: the key list and the object store of the next run
+fb_keys() {
+  : > "$FB_KEYS"
+  local k
+  for k in "$@"; do printf '%s\n' "$k" >> "$FB_KEYS"; done
+}
+fb_store() {
+  rm -f "$TMP/objects2"/*
+  local k
+  for k in "$@"; do printf x > "$TMP/objects2/$k"; done
+}
+
+# run_fb <name> [extra env assignments…]: like run_case, with the recording stubs; sets STATUS, ERR,
+# OUT and the number of ssh, scp and wrangler calls of the run
+run_fb() {
+  shift
+  rm -f "$SSH_LOG" "$SCP_LOG" "$CALLS2" "$TMP/root/.media-upload.done"
+  set +e
+  env -i PATH="$S2:/usr/bin:/bin" HOME="$TMP/home-fb" TMPDIR="$TMP/scratch" \
+    CLOUDFLARE_API_TOKEN="$DUMMY_TOKEN" CLOUDFLARE_ACCOUNT_ID="$DUMMY_ACCOUNT" \
+    WRANGLER="$S2/wrangler" POKOIN_OBJECTS="$TMP/objects2" KEYS_FILE="$FB_KEYS" \
+    SSH_LOG="$SSH_LOG" SCP_LOG="$SCP_LOG" CALLS2="$CALLS2" \
+    "$@" bash "$TMP/root/scripts/upload-media-r2.sh" >"$TMP/out2" 2>"$TMP/err2"
+  STATUS=$?
+  set -e
+  ERR="$(cat "$TMP/err2")"
+  OUT="$(cat "$TMP/out2")"
+  SSH_CALLS=0
+  SCP_CALLS=0
+  WR_CALLS=0
+  if [[ -e "$SSH_LOG" ]]; then SSH_CALLS="$(grep -c '^---$' "$SSH_LOG")"; fi
+  if [[ -e "$SCP_LOG" ]]; then SCP_CALLS="$(grep -c '^---$' "$SCP_LOG")"; fi
+  if [[ -e "$CALLS2" ]]; then WR_CALLS="$(grep -c . "$CALLS2")"; fi
+}
+
+# s1. no fallback host: nothing is asked of ssh, the key is skipped, the run says so and exits 3
+fb_keys b.png
+fb_store
+run_fb s1
+if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] \
+  && [[ "$WR_CALLS" -eq 0 ]] \
+  && [[ "$ERR" == *"skip (no source): b.png"* ]] \
+  && [[ "$ERR" == *$'\n'"1 keys skipped: no source"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+  ok "s1 (a): host unset: no ssh or scp call, key skipped, count line on stderr after the summary, exit 3"
+else
+  bad "s1: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS err=[$ERR] out=[$OUT]"
+fi
+
+# s2. fallback host set: ssh is asked exactly this command line, and the key it confirms is uploaded
+fb_keys b.png
+fb_store
+run_fb s2 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST"
+want_ssh="$(cat <<EXPECT
+---
+-o
+BatchMode=yes
+-o
+ConnectTimeout=10
+--
+$FB_HOST
+test -f $REMOTE_OBJECTS/b.png
+EXPECT
+)"
+got_ssh=""
+[[ -e "$SSH_LOG" ]] && got_ssh="$(cat "$SSH_LOG")"
+scp_line=()
+[[ -e "$SCP_LOG" ]] && mapfile -t scp_line < "$SCP_LOG"
+want_wr="r2 object put pokoin-test-media/b.png --file ${scp_line[4]:-none} --remote --content-type image/png"
+if [[ "$SSH_CALLS" -eq 1 ]] && [[ "$got_ssh" == "$want_ssh" ]] \
+  && [[ "$SCP_CALLS" -eq 1 ]] && [[ "${#scp_line[@]}" -eq 5 ]] \
+  && [[ "${scp_line[1]}" == "-q" ]] && [[ "${scp_line[2]}" == "--" ]] \
+  && [[ "${scp_line[3]}" == "$FB_HOST:$REMOTE_OBJECTS/b.png" ]] \
+  && [[ "${scp_line[4]}" == "$TMP/scratch/b.png."* ]] \
+  && [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] && [[ "$(cat "$CALLS2")" == "$want_wr" ]] \
+  && [[ "$ERR" != *"keys skipped"* ]] \
+  && [[ ! -e "${scp_line[4]}" ]] && [[ "$(cat "$TMP/root/.media-upload.done")" == "b.png" ]]; then
+  ok "s2 (b): host set: ssh got its options then --, the host and the test; the fetched key uploaded, exit 0"
+else
+  bad "s2: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS ssh_log=[$got_ssh] scp_log=[${scp_line[*]}] calls=[$(cat "$CALLS2" 2>/dev/null)] want_wr=[$want_wr] err=[$ERR]"
+fi
+
+# s3. a value that is not a plain host token is refused before any ssh or scp call; empty is unset
+fb_keys b.png
+fb_store
+for bad_value in '-oProxyCommand=x' 'a b' 'x;id'; do
+  run_fb s3 POKOIN_MEDIA_FALLBACK_HOST="$bad_value"
+  if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
+    && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
+    ok "s3 (c): value [$bad_value]: exit 2, only that line on stderr, no ssh, scp or wrangler call"
+  else
+    bad "s3: value [$bad_value] status=$STATUS err=[$ERR] ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS"
+  fi
+done
+run_fb s3e POKOIN_MEDIA_FALLBACK_HOST=
+if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"invalid"* ]] \
+  && [[ "$ERR" == *"skip (no source): b.png"* ]]; then
+  ok "s3 (c): an empty value means no fallback, not an invalid one"
+else
+  bad "s3e: status=$STATUS ssh=$SSH_CALLS err=[$ERR]"
+fi
+
+# s4. one key resolvable and one not: the resolvable one is still uploaded, the run exits 3
+fb_keys a.png b.png
+fb_store a.png
+run_fb s4
+if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/a\.png' "$CALLS2" \
+  && [[ "$ERR" == *"skip (no source): b.png"* ]] && [[ "$ERR" != *"skip (no source): a.png"* ]] \
+  && [[ "$ERR" == *$'\n'"1 keys skipped: no source"* ]] \
+  && [[ "$(cat "$TMP/root/.media-upload.done")" == "a.png" ]]; then
+  ok "s4 (d): a mixed list: the key with a source uploaded, the one without counted, exit 3"
+else
+  bad "s4: status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS calls=[$(cat "$CALLS2" 2>/dev/null)] err=[$ERR]"
+fi
+
+# s5. a key whose alias has no source either is counted too (the other skip message)
+fb_keys c.png
+fb_store
+run_fb s5 STUB_ALIAS=gone.png
+if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] \
+  && [[ "$ERR" == *"skip (no source or alias): c.png (alias gone.png)"* ]] \
+  && [[ "$ERR" == *$'\n'"1 keys skipped: no source"* ]]; then
+  ok "s5: the alias that resolves to nothing is counted by the same line and the same exit 3"
+else
+  bad "s5: status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s6. the credentials loader block is delimited by exactly one begin and one end marker line
+begin_n="$(awk '/^# --- credentials loader: begin$/{n++} END{print n+0}' "$SRC")"
+end_n="$(awk '/^# --- credentials loader: end$/{n++} END{print n+0}' "$SRC")"
+if [[ "$begin_n" == "1" && "$end_n" == "1" ]]; then
+  ok "s6 (e): exactly one loader begin marker and one loader end marker"
+else
+  bad "s6: begin markers=$begin_n end markers=$end_n"
+fi
+
 if [[ -e "$TMP/forbidden.calls" ]]; then
   bad "ssh/scp stub was called: $(cat "$TMP/forbidden.calls")"
 fi
