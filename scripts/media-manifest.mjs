@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 import { collectMediaKeys } from './media-collect.mjs';
-import { assertNoHost } from './media-manifest-guard.mjs';
+import { assertNoHost, assertNoLeaks } from './media-manifest-guard.mjs';
 import { MEDIA_BASE } from '../src/lib/media.js';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
@@ -192,11 +192,17 @@ async function main() {
   };
 
   const text = `${JSON.stringify(manifest, null, 2)}\n`;
-  // the check runs on the string that is about to become the file, before anything is written
+  // the checks run on the manifest that is about to become the file, before anything is written
   try {
     assertNoHost(text, PI_HOST);
   } catch {
     console.error('refusing to write a manifest that names the fallback host');
+    process.exit(1);
+  }
+  try {
+    assertNoLeaks(manifest);
+  } catch (e) {
+    console.error(`refusing to write a manifest that names a directory: ${e.message}`);
     process.exit(1);
   }
   writeFileSync(OUT, text);

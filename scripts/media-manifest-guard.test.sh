@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Tests for scripts/media-manifest-guard.mjs, the check the manifest generator runs on its own
-# output before it writes the file, and for the two rules scripts/media-manifest.mjs holds so that
-# the file it writes names neither a directory nor a host: the object directory comes from the
-# environment with no default in the tree, and the object column holds a key.
+# Tests for scripts/media-manifest-guard.mjs, the two checks the manifest generator runs on its own
+# output before it writes the file -- that the text names no fallback host, and that no row holds a
+# directory -- and for the two rules scripts/media-manifest.mjs holds so that the file it writes
+# names neither a directory nor a host: the object directory comes from the environment with no
+# default in the tree, and the object column holds a key.
 #
 # The generator is never run and never imported. Importing it reaches the live catalog, so every
 # statement about it here is read out of its text, and the only module any process imports is the
@@ -131,6 +132,158 @@ if node --check "$GUARD"; then ok "node --check parses the guard module"; else b
 if node --check "$GEN"; then ok "node --check parses the generator"; else bad "node --check failed on $GEN"; fi
 
 # ---------------------------------------------------------------------------
+# 1b. assertNoLeaks, imported and called for itself: the check that keeps a directory out of the
+#     file when no fallback host is configured, which is exactly the case assertNoHost skips. The
+#     guard is the only module imported, behind the same stub that fails the test on a network call.
+# ---------------------------------------------------------------------------
+# The three shapes, assembled from fragments: a tracked file of this repository holds no account
+# directory of its own, any more than the manifest it builds may hold one.
+ACCOUNT_ROOT_ONE="/ho""me"
+ACCOUNT_ROOT_TWO="/U""sers"
+ACCOUNT_OWNER="some.owner"
+LEAK_HOST="elsewhere.example.invalid"
+LEAK_ABSOLUTE="/store/a.png"
+LEAK_HOME_ONE="mnt${ACCOUNT_ROOT_ONE}/${ACCOUNT_OWNER}/a.png"
+LEAK_HOME_TWO="mnt${ACCOUNT_ROOT_TWO}/${ACCOUNT_OWNER}/a.png"
+LEAK_SSH="ssh:${LEAK_HOST}:/store/a.png"
+# the wording of the refusal, with the two names the check fills in: never the offending value
+WANT_LEAK_LINE="row KEY: field FIELD looks like a path"
+
+cat > "$TMP/assert-no-leaks.mjs" <<'NODE'
+import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
+
+const [guardPath, wantLine, committedPath, absolute, homeOne, homeTwo, sshRef] = process.argv.slice(2);
+const net = { calls: 0 };
+globalThis.fetch = () => {
+  net.calls += 1;
+  throw new Error('the guard reached the network');
+};
+const wantFor = (key, field) => wantLine.replace('KEY', key).replace('FIELD', field);
+
+const mod = await import(pathToFileURL(guardPath).href);
+if (typeof mod.assertNoLeaks !== 'function') {
+  console.log(`FAIL: assertNoLeaks is ${typeof mod.assertNoLeaks}, not a function`);
+  process.exit(1);
+}
+if (typeof mod.assertNoHost !== 'function') {
+  console.log('FAIL: assertNoHost is gone from the module');
+  process.exit(1);
+}
+const { assertNoLeaks, assertNoHost } = mod;
+
+const problems = [];
+// row <key> with one string in that field; every other field of a real row stays out of the way
+const rowWith = (key, field, value) => ({
+  entries: [
+    {
+      key,
+      sources: field === 'sources' ? [value] : ['public/review/x.json'],
+      object: field === 'object' ? value : null,
+      aliasOf: field === 'aliasOf' ? value : undefined,
+      objectStore: 'local',
+      size: 12,
+      sha256: 'ab'.repeat(32),
+    },
+  ],
+});
+const expectLeak = (name, key, field, value, manifest) => {
+  const want = wantFor(key, field);
+  let thrown = null;
+  try {
+    assertNoLeaks(manifest);
+  } catch (e) {
+    thrown = e;
+  }
+  if (!thrown) {
+    problems.push(`${name}: it accepted the manifest instead of throwing`);
+    return;
+  }
+  if (thrown.message !== want) {
+    problems.push(`${name}: it threw [${thrown.message}] instead of [${want}]`);
+    return;
+  }
+  if (thrown.message.includes(value)) {
+    problems.push(`${name}: the refusal printed the offending value`);
+    return;
+  }
+  console.log(`${name}: throws with the key and the field, and no value`);
+};
+const expectClean = (name, manifest) => {
+  try {
+    assertNoLeaks(manifest);
+    console.log(`${name}: accepts the manifest`);
+  } catch (e) {
+    problems.push(`${name}: it threw [${e.message}] on a manifest it must accept`);
+  }
+};
+
+for (const [name, value] of [
+  ['an absolute path', absolute],
+  ['a home directory of the first account root', homeOne],
+  ['a home directory of the second account root', homeTwo],
+  ['an ssh reference', sshRef],
+]) {
+  expectLeak(`${name}, in the object column`, 'a.png', 'object', value, rowWith('a.png', 'object', value));
+}
+// the field is named, not assumed: the same shape in another column of the same row is refused too
+expectLeak('an absolute path in a sources entry', 'a.png', 'sources', absolute, rowWith('a.png', 'sources', absolute));
+expectLeak('an absolute path in the alias column', 'a.png', 'aliasOf', absolute, rowWith('a.png', 'aliasOf', absolute));
+// the key of the row is what the refusal names, so a run says which row to look at
+expectLeak('the row of a key that holds a slash', 'figure-masks-whole/v9.webp', 'object', homeOne,
+  rowWith('figure-masks-whole/v9.webp', 'object', homeOne));
+
+// a relative key is not a path, however many slashes it holds: this is the shape of the seven
+// figure-masks-whole rows the committed manifest carries
+expectClean('a key with a slash as the object column', {
+  entries: [{ key: 'figure-masks-whole/v1.webp', sources: ['src/pages/a.jsx'], object: 'figure-masks-whole/v1.webp',
+    objectStore: 'local', size: null, sha256: null }],
+});
+expectClean('a manifest with no rows', { entries: [] });
+expectClean('a row of nulls and numbers', rowWith('a.png', 'object', null));
+
+// the check runs on the manifest object and on the text that is about to become the file alike
+expectLeak('the serialised text of a dirty row', 'a.png', 'object', absolute, JSON.stringify(rowWith('a.png', 'object', absolute), null, 2));
+expectClean('the serialised text of a clean row', JSON.stringify(rowWith('a.png', 'object', 'a.png'), null, 2));
+
+// the file the repository actually holds passes the check: read, never written, and the generator
+// runs in no case of this suite
+const committed = JSON.parse(readFileSync(committedPath, 'utf8'));
+expectClean(`the committed manifest (${committed.entries.length} rows)`, committed);
+
+// with no host configured assertNoHost refuses nothing, which is the hole this check closes
+let hostSaid = '';
+try {
+  assertNoHost(JSON.stringify(rowWith('a.png', 'object', absolute)), undefined);
+} catch (e) {
+  hostSaid = e.message;
+}
+if (hostSaid) problems.push(`assertNoHost threw [${hostSaid}] on an unset host, which it must not`);
+else console.log('an unset host is nothing for assertNoHost to keep out, and the leak check still refuses the row');
+
+if (net.calls !== 0) problems.push(`the guard module reached the network ${net.calls} time(s)`);
+else console.log('importing and calling the leak check asks the network nothing');
+
+if (problems.length) {
+  console.log(problems.map((p) => `FAIL: ${p}`).join('\n'));
+  process.exit(1);
+}
+console.log('all passed');
+NODE
+
+node_rc=0
+node_out="$(node "$TMP/assert-no-leaks.mjs" "$GUARD" "$WANT_LEAK_LINE" "${HERE}/../media-manifest.json" \
+  "$LEAK_ABSOLUTE" "$LEAK_HOME_ONE" "$LEAK_HOME_TWO" "$LEAK_SSH" 2>&1)" || node_rc=$?
+if [[ "$node_rc" -eq 0 ]] && [[ "$node_out" == *"all passed"* ]]; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && ok "assertNoLeaks: $line"
+  done <<< "$node_out"
+else
+  printf '%s\n' "$node_out"
+  bad "assertNoLeaks: the module did not hold the contract (rc $node_rc)"
+fi
+
+# ---------------------------------------------------------------------------
 # 2. What the generator must say, read out of its text: it is never run.
 # ---------------------------------------------------------------------------
 # g1. the object directory comes from the environment, and the tree holds no default for it
@@ -237,6 +390,45 @@ if [[ "$write_n" == "1" ]]; then
   ok "g8: OUT is written from exactly one statement, which the guard stands in front of"
 else
   bad "g8: OUT is written from $write_n statements, expected exactly 1"
+fi
+
+# g9. the leak check is wired into the same write: imported, called on the manifest, ahead of it,
+#     and its refusal is what ends the run
+if ! holds "$GEN" 'assertNoLeaks'; then
+  bad "g9: the generator does not name the leak check at all"
+else
+  leak_call="$(first_line "$GEN" 'assertNoLeaks(')"
+  leak_write="$(first_line "$GEN" 'writeFileSync(OUT')"
+  if [[ "$leak_call" == "0" || "$leak_write" == "0" ]]; then
+    bad "g9: the leak-check call ($leak_call) or the write ($leak_write) was not found"
+  elif (( leak_call < leak_write )); then
+    ok "g9: the leak check runs on line $leak_call, ahead of the write on line $leak_write"
+  else
+    bad "g9: the leak check runs after the file was written ($leak_call vs $leak_write)"
+  fi
+fi
+leak_refused="$(first_line "$GEN" 'assertNoLeaks(')"
+if [[ "$leak_refused" == "0" ]]; then
+  bad "g9: no leak-check call to read the refusal after"
+else
+  # the two lines under the call carry the message and the exit, however the file is laid out
+  around="$(sed -n "$((leak_refused + 1)),$((leak_refused + 4))p" "$GEN")"
+  if ! holds <(printf '%s\n' "$around") 'process.exit(1)'; then
+    bad "g9: the leak check is not followed by an exit 1: [$(printf '%s | ' "$around")]"
+  elif ! printf '%s\n' "$around" | grep -q 'console.error'; then
+    bad "g9: the leak check prints no error line: [$(printf '%s | ' "$around")]"
+  elif printf '%s\n' "$around" | grep -q 'e\.message'; then
+    ok "g9: the leak refusal prints the check's own reason on stderr and exits 1"
+  else
+    bad "g9: the leak refusal does not pass on what the check named: [$(printf '%s | ' "$around")]"
+  fi
+fi
+
+# g10. the check runs on the manifest the run is about to write, not on a value read back from disk
+if grep -q -E 'assertNoLeaks\((manifest|text)\)' "$GEN"; then
+  ok "g10: the leak check is handed the manifest of this run"
+else
+  bad "g10: the leak check is not handed the manifest object or its text: [$(grep -E 'assertNoLeaks\(' "$GEN" | head -1)]"
 fi
 
 if [[ "$fail" -ne 0 ]]; then
