@@ -38,6 +38,13 @@ fail=0
 ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
 
+# the script under test is executable, so ./scripts/upload-media-r2.sh runs after a clone
+if [[ -x "$SRC" ]]; then
+  ok "o: the script under test is executable"
+else
+  bad "o: the script under test is not executable: $SRC"
+fi
+
 # run_case <name> <HOME dir> [extra env assignments...]; sets STATUS, ERR
 run_case() {
   shift; local home="$1"; shift
