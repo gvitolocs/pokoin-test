@@ -11,7 +11,7 @@ DUMMY_ACCOUNT="dummy-account-for-test"
 TMP="$(mktemp -d "${TMPDIR:-/var/tmp}/upload-media-r2-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/root/scripts" "$TMP/stubs" "$TMP/objects"
+mkdir -p "$TMP/scratch" "$TMP/root/scripts" "$TMP/stubs" "$TMP/objects"
 cp "$SRC" "$TMP/root/scripts/upload-media-r2.sh"
 printf "{\"entries\":[{\"key\":\"a.png\"}]}\n" > "$TMP/root/media-manifest.json"
 printf "{}\n" > "$TMP/root/media-aliases.json"
@@ -38,8 +38,9 @@ bad() { echo "FAIL: $1"; fail=1; }
 run_case() {
   shift; local home="$1"; shift
   rm -f "$CALLS" "$TMP/root/.media-upload.done"
+  printf x > "$TMP/objects/a.png"
   set +e
-  env -i PATH="$TMP/stubs:/usr/bin:/bin" HOME="$home" TMPDIR="$TMP" \
+  env -i PATH="$TMP/stubs:/usr/bin:/bin" HOME="$home" TMPDIR="$TMP/scratch" \
     WRANGLER="$TMP/stubs/wrangler" POKOIN_OBJECTS="$TMP/objects" KEYS_FILE="$TMP/keys.txt" \
     "$@" bash "$TMP/root/scripts/upload-media-r2.sh" >"$TMP/out" 2>"$TMP/err"
   STATUS=$?
@@ -93,6 +94,20 @@ H="$(mk_home home-d)"
 printf "CLOUDFLARE_API_TOKEN=%s\nCLOUDFLARE_ACCOUNT_ID=%s\n" "$DUMMY_TOKEN" "$DUMMY_ACCOUNT" > "$H/.config/pokoin/cloudflare.env"
 run_case d "$H" LANE_WORKER=1
 expect_preflight d
+
+# f. credentials file that refers to an unset variable before the assignments
+H="$(mk_home home-f)"
+{
+  echo "echo \"\$A_VARIABLE_THAT_IS_NOT_SET\" >/dev/null"
+  printf "CLOUDFLARE_API_TOKEN=%s\nCLOUDFLARE_ACCOUNT_ID=%s\n" "$DUMMY_TOKEN" "$DUMMY_ACCOUNT"
+} > "$H/.config/pokoin/cloudflare.env"
+run_case f "$H"
+if [[ "$STATUS" -eq 0 ]] && [[ -e "$CALLS" ]] && grep -q "^token-set " "$CALLS" \
+  && [[ "$ERR" != *"unbound variable"* ]]; then
+  ok "f: unset variable inside the file tolerated, wrangler saw token-set"
+else
+  bad "f: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
 
 if [[ -e "$TMP/forbidden.calls" ]]; then
   bad "ssh/scp stub was called: $(cat "$TMP/forbidden.calls")"

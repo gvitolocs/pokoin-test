@@ -12,9 +12,12 @@ set -euo pipefail
 _cf_env="${HOME:-}/.config/pokoin/cloudflare.env"
 if [[ -z "${LANE_WORKER:-}" && -f "$_cf_env" && -r "$_cf_env" ]]; then
   case $- in *a*) _cf_had_a=1 ;; *) _cf_had_a=0 ;; esac
+  case $- in *u*) _cf_had_u=1 ;; *) _cf_had_u=0 ;; esac
   set -a
+  set +u
   # shellcheck disable=SC1090
   . "$_cf_env" >/dev/null 2>&1 || true
+  [[ "$_cf_had_u" == 1 ]] && set -u
   [[ "$_cf_had_a" == 1 ]] || set +a
 fi
 
