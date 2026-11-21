@@ -175,7 +175,7 @@ upload_one() {
   fi
 }
 
-export BUCKET DONE OBJECTS PI_HOST PI_OBJECTS WRANGLER FORCE
+export ALIASES BUCKET DONE OBJECTS PI_HOST PI_OBJECTS WRANGLER FORCE
 export -f resolve_file upload_one alias_for content_type_for
 
 echo "Uploading with $WRANGLER (parallel ${PARALLEL})…"
