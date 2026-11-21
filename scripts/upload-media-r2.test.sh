@@ -22,9 +22,12 @@ CALLS="$TMP/wrangler.calls"
 cat > "$TMP/stubs/wrangler" <<STUB
 #!/bin/sh
 if [ -n "\${CLOUDFLARE_API_TOKEN:-}" ]; then s=token-set; else s=token-unset; fi
-echo "\$s \$*" >> "$CALLS"
+if [ "\${CLOUDFLARE_API_TOKEN:-}" = "dummy-token-for-test" ]; then v=value-from-file; else v=value-other; fi
+echo "\$s \$v \$*" >> "$CALLS"
+[ "\${FAIL_WRANGLER:-}" = 1 ] && exit 1
+exit 0
 STUB
-printf "#!/bin/sh\nexit 0\n" > "$TMP/stubs/node"
+printf "#!/bin/sh\n[ \"\${NODE_FAIL:-}\" = 1 ] && exit 1\nexit 0\n" > "$TMP/stubs/node"
 for n in ssh scp; do
   printf "#!/bin/sh\necho \"%s called\" >> \"%s/forbidden.calls\"\nexit 1\n" "$n" "$TMP" > "$TMP/stubs/$n"
 done
@@ -50,16 +53,23 @@ run_case() {
 
 mk_home() { mkdir -p "$TMP/$1/.config/pokoin"; echo "$TMP/$1"; }
 
+# expect_preflight <name> <detail in parentheses>: exact stderr line, exit 1, wrangler not called
 expect_preflight() {
-  local name="$1"
-  if [[ "$STATUS" -eq 1 ]] \
-    && [[ "$ERR" == *CLOUDFLARE_API_TOKEN*CLOUDFLARE_ACCOUNT_ID* ]] \
-    && [[ "$ERR" != *"unbound variable"* ]] \
-    && [[ ! -e "$CALLS" ]]; then
-    ok "$name: preflight message, exit 1, wrangler not called"
+  local name="$1" want="CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set ($2)"
+  if [[ "$STATUS" -eq 1 ]] && [[ "$ERR" == "$want" ]] && [[ ! -e "$CALLS" ]]; then
+    ok "$name: only the preflight line on stderr, exit 1, wrangler not called"
   else
     bad "$name: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || true)"
   fi
+}
+
+# write_creds <home> [lines placed before the two dummy assignments...]
+write_creds() {
+  local home="$1"; shift
+  {
+    for l in "$@"; do printf "%s\n" "$l"; done
+    printf "CLOUDFLARE_API_TOKEN=%s\nCLOUDFLARE_ACCOUNT_ID=%s\n" "$DUMMY_TOKEN" "$DUMMY_ACCOUNT"
+  } > "$home/.config/pokoin/cloudflare.env"
 }
 
 # a. credentials file present
@@ -81,19 +91,19 @@ fi
 # b. credentials file absent
 H="$(mk_home home-b)"
 run_case b "$H"
-expect_preflight b
+expect_preflight b "looked in $H/.config/pokoin/cloudflare.env"
 
 # c. credentials file with a syntax error and no valid assignments
 H="$(mk_home home-c)"
 printf "if then fi ((( \"unterminated\n" > "$H/.config/pokoin/cloudflare.env"
 run_case c "$H"
-expect_preflight c
+expect_preflight c "looked in $H/.config/pokoin/cloudflare.env"
 
 # d. LANE_WORKER set: file is not loaded
 H="$(mk_home home-d)"
 printf "CLOUDFLARE_API_TOKEN=%s\nCLOUDFLARE_ACCOUNT_ID=%s\n" "$DUMMY_TOKEN" "$DUMMY_ACCOUNT" > "$H/.config/pokoin/cloudflare.env"
 run_case d "$H" LANE_WORKER=1
-expect_preflight d
+expect_preflight d "credentials file not read because LANE_WORKER is set"
 
 # f. credentials file that refers to an unset variable before the assignments
 H="$(mk_home home-f)"
@@ -107,6 +117,50 @@ if [[ "$STATUS" -eq 0 ]] && [[ -e "$CALLS" ]] && grep -q "^token-set " "$CALLS" 
   ok "f: unset variable inside the file tolerated, wrangler saw token-set"
 else
   bad "f: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# g. the credentials file prints to stdout and stderr: the script prints nothing of it
+H="$(mk_home home-g)"
+write_creds "$H" "echo noise-out" "echo noise-err >&2"
+run_case g "$H"
+if [[ "$STATUS" -eq 0 ]] && grep -q "^token-set " "$CALLS" \
+  && ! grep -q "noise" "$TMP/out" "$TMP/err" && [[ -z "$ERR" ]]; then
+  ok "g: output of the credentials file is not printed"
+else
+  bad "g: status=$STATUS err=[$ERR]"
+fi
+
+# h. the credentials file runs set -x: no trace and no credential value on stderr afterwards
+H="$(mk_home home-h)"
+write_creds "$H" "set -x"
+run_case h "$H"
+if [[ "$STATUS" -eq 0 ]] && grep -q "^token-set " "$CALLS" \
+  && ! grep -qF -e "$DUMMY_TOKEN" -e "$DUMMY_ACCOUNT" "$TMP/out" "$TMP/err" \
+  && ! grep -q "^+" "$TMP/err"; then
+  ok "h: xtrace from the credentials file is not left on"
+else
+  bad "h: status=$STATUS err=[$ERR]"
+fi
+
+# i. the credentials file runs set +e: errexit stays on (a failing node stub at the end stops the
+#    script before the final line)
+H="$(mk_home home-i)"
+write_creds "$H" "set +e"
+run_case i "$H" NODE_FAIL=1
+if [[ "$STATUS" -ne 0 ]] && ! grep -q "^Done" "$TMP/out"; then
+  ok "i: errexit still on after the credentials file ran set +e"
+else
+  bad "i: status=$STATUS out=[$(cat "$TMP/out")]"
+fi
+
+# j. variables exported by the caller are replaced by the values in the file
+H="$(mk_home home-j)"
+write_creds "$H"
+run_case j "$H" CLOUDFLARE_API_TOKEN=caller-token-dummy CLOUDFLARE_ACCOUNT_ID=caller-account-dummy
+if [[ "$STATUS" -eq 0 ]] && grep -q "^token-set value-from-file " "$CALLS"; then
+  ok "j: values from the credentials file replace exported ones"
+else
+  bad "j: status=$STATUS calls=$(cat "$CALLS" 2>/dev/null || echo none)"
 fi
 
 if [[ -e "$TMP/forbidden.calls" ]]; then
