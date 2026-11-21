@@ -62,7 +62,10 @@ guard_manifest() {
 }
 on_exit() {
   local rc=$?
-  rm -rf -- "$TMP"
+  # three cases make the directory of the done list unwritable to get a permission failure; if a run
+  # died between that and the restore the cleanup below could not empty it
+  chmod -R u+rwX "$TMP/root" 2> /dev/null || true
+  rm -rf "$TMP"
   if [[ "$guard_done" -eq 0 ]] && ! guard_manifest; then rc=1; fi
   exit "$rc"
 }
