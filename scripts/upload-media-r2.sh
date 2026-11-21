@@ -39,6 +39,12 @@ PUBLIC_BASE="https://test-media.pokoin.com"
 OBJECTS="${POKOIN_OBJECTS:-/home/nez/data/pokoin-leftovers/objects}"
 PI_OBJECTS="/srv/pokoin/card-images/objects"
 PI_HOST="${POKOIN_MEDIA_FALLBACK_HOST:-}"
+# the host reaches ssh and scp as one argument, so it must not start with a dash nor hold a space or
+# another shell character; nothing is looked up before it is accepted
+if [[ -n "$PI_HOST" && ! "$PI_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]]; then
+  echo "invalid POKOIN_MEDIA_FALLBACK_HOST" >&2
+  exit 2
+fi
 WRANGLER="${WRANGLER:-$HOME/.bun/bin/wrangler}"
 PARALLEL="${PARALLEL:-8}"
 FORCE="${FORCE:-0}"
@@ -115,10 +121,10 @@ resolve_file() {
     printf '%s' "$path"
     return 0
   fi
-  if [[ -n "$PI_HOST" ]] && ssh -o BatchMode=yes -o ConnectTimeout=10 "${PI_HOST}" "test -f ${PI_OBJECTS}/${key}" 2>/dev/null; then
+  if [[ -n "$PI_HOST" ]] && ssh -o BatchMode=yes -o ConnectTimeout=10 -- "${PI_HOST}" "test -f ${PI_OBJECTS}/${key}" 2>/dev/null; then
     local tmp
     tmp="$(mktemp -p "${TMPDIR:-/tmp}" "$(basename "$key").XXXXXX")"
-    scp -q "${PI_HOST}:${PI_OBJECTS}/${key}" "$tmp"
+    scp -q -- "${PI_HOST}:${PI_OBJECTS}/${key}" "$tmp"
     printf '%s' "$tmp"
     return 0
   fi
