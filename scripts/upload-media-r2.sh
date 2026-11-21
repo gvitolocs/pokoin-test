@@ -6,6 +6,8 @@
 # Optional:
 #   KEYS_FILE=path   — upload only keys listed in the file (one per line), ignoring the done-list unless FORCE=1
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
+# A key the file or the manifest names twice is uploaded once: the list is deduped before the keys go
+# out, so what the run handed out and what it got reports about are the same set.
 set -euo pipefail
 
 # --- credentials loader: begin
@@ -71,14 +73,15 @@ fi
 
 touch "$DONE"
 
-# the keys with no source and the keys whose upload failed are found by the xargs children, which
-# share no variable with this shell, so each of them appends to a file in a private temporary
-# directory
+# the keys the run worked through are found by the xargs children, which share no variable with this
+# shell, so each of them appends one line per key to one record file in a private temporary
+# directory: `ok`, `skip`, `fail` or `norecord` and the key. The parent reads that file for the
+# counts and for the keys that never reported themselves.
 WORK="$(mktemp -d -p "${TMPDIR:-/tmp}" "upload-media-r2.XXXXXX")"
 trap 'rm -rf -- "${WORK}"' EXIT
-SKIP_LIST="${WORK}/no-source"
-FAIL_LIST="${WORK}/upload-failed"
-export SKIP_LIST FAIL_LIST
+RESULTS="${WORK}/results"
+: > "$RESULTS"
+export RESULTS
 
 if [[ -n "${KEYS_FILE:-}" ]]; then
   mapfile -t KEYS < <(grep -v '^[[:space:]]*$' "$KEYS_FILE" | grep -v '^#')
@@ -87,6 +90,14 @@ else
 const m = JSON.parse(require('fs').readFileSync('${MANIFEST}', 'utf8'));
 for (const e of m.entries) console.log(e.key);
 ")
+fi
+
+# The accounting at the end compares the keys handed to xargs with the distinct keys that reported
+# themselves, so a key named twice in the file, or held as two rows of the manifest, would be handed
+# out twice and accounted once. The list keeps one row per key here, the first row it came in on, in
+# the order of the list; an empty list stays empty.
+if (( ${#KEYS[@]} > 0 )); then
+  mapfile -t KEYS < <(printf '%s\n' "${KEYS[@]}" | awk '!seen[$0]++')
 fi
 
 echo "Keys to process: ${#KEYS[@]}"
@@ -133,10 +144,22 @@ resolve_file() {
   return 1
 }
 
+# the one line a child writes for the key it was handed. The write is tested and a child that cannot
+# do it ends nonzero itself, because the record is how the parent learns the key was worked at all
+record_result() {
+  local status="$1" key="$2"
+  if ! printf '%s %s\n' "$status" "$key" >> "$RESULTS"; then
+    echo "cannot record result for: $key" >&2
+    return 1
+  fi
+  return 0
+}
+
 upload_one() {
   local key="$1"
-  if [[ "$FORCE" != "1" ]] && grep -Fxq "$key" "$DONE" 2>/dev/null; then
-    return 0
+  if [[ "$FORCE" != "1" ]] && grep -Fxq -- "$key" "$DONE" 2>/dev/null; then
+    record_result ok "$key"
+    return
   fi
   local source_key="$key"
   local file tmp_cleanup=""
@@ -147,13 +170,13 @@ upload_one() {
       source_key="$alias"
       if ! file="$(resolve_file "$source_key")"; then
         echo "skip (no source or alias): $key (alias $alias)" >&2
-        printf '%s\n' "$key" >> "$SKIP_LIST"
-        return 0
+        record_result skip "$key"
+        return
       fi
     else
       echo "skip (no source): $key" >&2
-      printf '%s\n' "$key" >> "$SKIP_LIST"
-      return 0
+      record_result skip "$key"
+      return
     fi
   fi
   if [[ "$file" == /tmp/* ]] || [[ "$file" == "${TMPDIR:-/tmp}"/* ]]; then
@@ -172,52 +195,90 @@ upload_one() {
   "$WRANGLER" "${put_args[@]}" || put_status=$?
   if [[ "$put_status" -ne 0 ]]; then
     echo "upload failed: $key" >&2
-    printf '%s\n' "$key" >> "$FAIL_LIST"
     if [[ -n "$tmp_cleanup" ]]; then rm -f "$tmp_cleanup"; fi
-    return 0
+    record_result fail "$key"
+    return
   fi
-  if [[ "$FORCE" == "1" ]]; then
-    grep -Fxv "$key" "$DONE" > "${DONE}.tmp" 2>/dev/null || true
-    mv "${DONE}.tmp" "$DONE"
+  # The key went up. The row in the done list is what tells a later run not to put it up again, and a
+  # list that will not take it is a result of its own: the status of the append is the only thing
+  # that says so. The group keeps the error of the redirection itself off stderr, since the line
+  # under is the same fact in words; the record still says the key was worked.
+  if ! { echo "$key" >> "$DONE"; } 2> /dev/null; then
+    [[ -n "$tmp_cleanup" ]] && rm -f "$tmp_cleanup"
+    echo "done list not writable: $key" >&2
+    record_result norecord "$key"
+    return
   fi
-  echo "$key" >> "$DONE"
   [[ -n "$tmp_cleanup" ]] && rm -f "$tmp_cleanup"
   if [[ "$source_key" != "$key" ]]; then
     echo "uploaded $key (from alias $source_key)" >&2
   fi
+  record_result ok "$key"
 }
 
 export ALIASES BUCKET DONE OBJECTS PI_HOST PI_OBJECTS WRANGLER FORCE
-export -f resolve_file upload_one alias_for content_type_for
+export -f resolve_file upload_one alias_for content_type_for record_result
 
 echo "Uploading with $WRANGLER (parallel ${PARALLEL})…"
-printf '%s\n' "${KEYS[@]}" | xargs -P "$PARALLEL" -I {} bash -c 'upload_one "$@"' _ {}
+# the status of xargs is captured rather than left to errexit, because a child that exits 255 or dies
+# of a signal makes xargs stop there: the keys it never reached are known only after this, so the
+# run has to go on and print what it knows
+XARGS_STATUS=0
+printf '%s\n' "${KEYS[@]}" | xargs -P "$PARALLEL" -I {} bash -c 'upload_one "$@"' _ {} \
+  || XARGS_STATUS=$?
+
+# a forced key is recorded once, at the end of the done list: the children only append to it, and the
+# row that stays is the last copy of each key, so what the whole list is left holding is every key
+# once. Two children rewriting it through one shared temporary file used to lose rows of keys they
+# were never given. The status is captured, because the list as the children left it already says
+# what was uploaded: a rewrite that cannot create its temporary file or cannot move it leaves the
+# duplicate rows and is reported below, rather than ending the run before the counts.
+REWRITE_STATUS=0
+if [[ "$FORCE" == "1" ]]; then
+  tac "$DONE" | awk '!seen[$0]++' | tac > "${DONE}.tmp" \
+    && mv "${DONE}.tmp" "$DONE" \
+    || REWRITE_STATUS=$?
+fi
 
 # the manifest is the record of what the generator found on neither store: a row with no object and
 # no alias is a key this run cannot be expected to upload, so it is counted apart. The three counts
 # go on stderr before the HEAD sample, so that a sample fetch which does not come back cannot hide
-# them.
-NULL_OBJECT="${WORK}/no-object-in-manifest"
-node -e "
+# them. The rows are kept in one variable of this shell, not in a file: a child whose record could
+# not be written may have taken the private directory of the run with it, and the counts still have
+# to be printed after that. The status of the read is captured for the same reason: without it every
+# skip counts as a key the store is missing, which is said apart below and costs the run its 0.
+MANIFEST_ROWS_STATUS=0
+NULL_ROWS="$(node -e "
 const m = JSON.parse(require('fs').readFileSync('${MANIFEST}', 'utf8'));
 for (const e of m.entries) if (e.object === null && !e.aliasOf) console.log(e.key);
-" > "$NULL_OBJECT"
+")" || MANIFEST_ROWS_STATUS=$?
 
 SKIPPED=0
 NO_OBJECT=0
 FAILED=0
-if [[ -s "$SKIP_LIST" ]]; then
-  while IFS= read -r skipped_key; do
-    if grep -Fxq -- "$skipped_key" "$NULL_OBJECT"; then
-      NO_OBJECT=$((NO_OBJECT + 1))
-    else
-      SKIPPED=$((SKIPPED + 1))
-    fi
-  done < "$SKIP_LIST"
+NOTRECORDED=0
+ACCOUNTED=0
+if [[ -f "$RESULTS" ]]; then
+  ACCOUNTED="$(cut -d' ' -f2- "$RESULTS" 2>/dev/null | sort -u | grep -c '' || true)"
+  while IFS= read -r result_line; do
+    result_status="${result_line%% *}"
+    result_key="${result_line#* }"
+    case "$result_status" in
+      fail) FAILED=$((FAILED + 1)) ;;
+      norecord) NOTRECORDED=$((NOTRECORDED + 1)) ;;
+      skip)
+        if grep -Fxq -- "$result_key" <<<"$NULL_ROWS"; then
+          NO_OBJECT=$((NO_OBJECT + 1))
+        else
+          SKIPPED=$((SKIPPED + 1))
+        fi ;;
+    esac
+  done < "$RESULTS"
 fi
-if [[ -s "$FAIL_LIST" ]]; then
-  FAILED="$(grep -c . "$FAIL_LIST")"
-fi
+# handed is what the run gave to xargs, accounted the distinct keys that recorded themselves. What is
+# left was never worked, or was worked by a child that could not say what it found.
+HANDED="${#KEYS[@]}"
+UNACCOUNTED=$(( HANDED - ACCOUNTED ))
 if (( NO_OBJECT > 0 )); then
   if (( NO_OBJECT == 1 )); then
     echo "1 key has no object in the manifest" >&2
@@ -239,11 +300,37 @@ if (( FAILED > 0 )); then
     echo "$FAILED keys failed to upload" >&2
   fi
 fi
+if (( NOTRECORDED > 0 )); then
+  if (( NOTRECORDED == 1 )); then
+    echo "1 key uploaded but not recorded in the done list" >&2
+  else
+    echo "$NOTRECORDED keys uploaded but not recorded in the done list" >&2
+  fi
+fi
+if (( UNACCOUNTED > 0 )); then
+  if (( UNACCOUNTED == 1 )); then
+    echo "unaccounted: 1 key" >&2
+  else
+    echo "unaccounted: $UNACCOUNTED keys" >&2
+  fi
+fi
+# xargs ends with a code of its own when a child exits 255 or dies of a signal, and neither is a
+# count of keys: the line names the status itself, so a run that accounted for every key and still
+# ends 4 says what it saw
+if (( XARGS_STATUS != 0 )); then
+  echo "xargs status: $XARGS_STATUS" >&2
+fi
+if (( MANIFEST_ROWS_STATUS != 0 )); then
+  echo "could not read the manifest rows" >&2
+fi
+if (( REWRITE_STATUS != 0 )); then
+  echo "could not rewrite the done list" >&2
+fi
 
 SAMPLE_COUNT=5
 echo "HEAD sample on ${PUBLIC_BASE}…"
 # the status of the sample is kept for the exit code instead of ending the run here, because it
-# counts for less than what the two lists above say
+# counts for less than what the records above say
 SAMPLE_STATUS=0
 node -e "
 const fs = require('fs');
@@ -260,13 +347,17 @@ const pick = keys.filter((_, i) => i % Math.max(1, Math.floor(keys.length / ${SA
 
 echo "Done. Uploaded keys recorded in ${DONE}"
 
-# the exit code of a run, in the order of what it means: 4 for a key whose upload failed, 3 for a
-# key the manifest gives a source, the sample's own status when the fetch did not come back, and 0
-# when none of the three applies, which is the status of an if that took no branch
-if (( FAILED > 0 )); then
+# the exit code of a run, in the order of what it means: 4 for a key whose upload failed, for a key
+# that uploaded into a done list that would not take it, for a key that recorded nothing, for an
+# xargs run that stopped before the end of the list, and for the two steps that read or rewrite what
+# the counts are made of; 3 for a key the manifest gives a source; 5 for the HEAD sample that did not
+# come back; and 0 when none of these applies, which is the status of an if that took no branch. The
+# 1 of a preflight check and the 2 of an unusable fallback host are long gone by here.
+if (( FAILED > 0 || NOTRECORDED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 \
+      || MANIFEST_ROWS_STATUS != 0 || REWRITE_STATUS != 0 )); then
   exit 4
 elif (( SKIPPED > 0 )); then
   exit 3
 elif (( SAMPLE_STATUS != 0 )); then
-  exit "$SAMPLE_STATUS"
+  exit 5
 fi

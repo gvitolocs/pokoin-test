@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/upload-media-r2.sh: credential loading and preflight, the fallback host, the
-# keys skipped for want of a source, the upload whose wrangler call fails; and
+# keys skipped for want of a source, the upload whose wrangler call fails, the keys a run failed to
+# account for, the key that is listed twice and the one it cannot record in the done list; and
 # scripts/no-host-names.test.sh as one of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
@@ -61,7 +62,10 @@ guard_manifest() {
 }
 on_exit() {
   local rc=$?
-  rm -rf -- "$TMP"
+  # three cases make the directory of the done list unwritable to get a permission failure; if a run
+  # died between that and the restore the cleanup below could not empty it
+  chmod -R u+rwX "$TMP/root" 2> /dev/null || true
+  rm -rf "$TMP"
   if [[ "$guard_done" -eq 0 ]] && ! guard_manifest; then rc=1; fi
   exit "$rc"
 }
@@ -179,17 +183,31 @@ else
   bad "h: status=$STATUS err=[$ERR]"
 fi
 
-# i. the credentials file runs set +e: errexit stays on. The run reaches the upload (wrangler stub
-#    called, no preflight text), and a failing node stub at the end stops the script before the
-#    final line.
+# i. the credentials file runs set +e: errexit stays on. No node call can show that any more, because
+#    every one of them has a captured status since the accounting, so the step that makes sure the
+#    done list exists is the one that ends the run: the directory of the list will not take a new
+#    file, and the run stops there, before the upload and before the final line.
 H="$(mk_home home-i)"
 write_creds "$H" "set +e"
-run_case i "$H" NODE_FAIL=1
-if [[ "$STATUS" -ne 0 ]] && [[ -e "$CALLS" ]] && [[ "$ERR" != *"must be set"* ]] \
-  && ! grep -q "^Done" "$TMP/out"; then
+rm -f "$TMP/root/.media-upload.done"
+chmod 555 "$TMP/root"
+run_case i "$H"
+chmod 755 "$TMP/root"
+if [[ "$STATUS" -eq 1 ]] && [[ "$ERR" == *"Permission denied"* ]] && [[ ! -e "$CALLS" ]] \
+  && [[ "$ERR" != *"must be set"* ]] && ! grep -q "^Done" "$TMP/out"; then
   ok "i: errexit still on after the credentials file ran set +e"
 else
   bad "i: status=$STATUS err=[$ERR] out=[$(cat "$TMP/out")]"
+fi
+
+# i2. a run whose node cannot read the manifest rows reports it instead of dying there: the counts,
+#     the Done line and exit 4, with the line that names the step that failed.
+run_case i2 "$H" NODE_FAIL=1
+if [[ "$STATUS" -eq 4 ]] && [[ "$ERR" == *"could not read the manifest rows"* ]] \
+  && grep -q "^Done" "$TMP/out"; then
+  ok "i2: a failing manifest-row read is reported and ends 4, it does not stop the run"
+else
+  bad "i2: status=$STATUS err=[$ERR] out=[$(cat "$TMP/out")]"
 fi
 
 # l. allexport is off again after the loader: a variable the script defines is not exported
@@ -326,6 +344,11 @@ if [ "$1" = "-e" ]; then
       # SAMPLE_FAIL=1 is the case of a sample fetch that does not come back
       if [ -n "${SAMPLE_FAIL:-}" ]; then exit 1; fi
       exit 0 ;;
+    *"object === null"*)
+      # NULL_ROWS_FAIL=1 is the case of the run that cannot read the manifest rows it needs for the
+      # count of the keys the generator found on neither store. Only that program matches here, so
+      # the key list and the alias lookups still run on the real node.
+      if [ -n "${NULL_ROWS_FAIL:-}" ]; then exit 1; fi ;;
   esac
 fi
 exec "$REAL_NODE" "$@"
@@ -333,17 +356,57 @@ STUB
 # The put of a key named in the FAIL_KEYS file fails, so a run can be shown what a failed wrangler
 # call does; the file is absent or empty when every upload is meant to succeed. The fourth argument
 # of a put is the target, bucket/key.
+#
+# Two more ways of breaking the xargs child, so a run can be shown what a child that never reports
+# its key does:
+#   UNRECORDABLE_KEY=<key>  the put of that key first removes the private directory the script put
+#                           its per-key record files in (only when that directory is under TMPDIR),
+#                           then fails: a child that wants to record the key finds nowhere to write.
+#   KILLED_KEY=<key>        the put of that key kills the shell that ran it -- the parent of this
+#                           stub, and only when that parent is bash -- so the child dies by signal.
 cat > "$S2/wrangler" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >> "$CALLS2"
+put_key=''
+if [ "$1" = r2 ] && [ "$2" = object ] && [ "$3" = put ]; then
+  put_key="${4#pokoin-test-media/}"
+fi
+if [ -n "$put_key" ] && [ -n "${UNRECORDABLE_KEY:-}" ] && [ "$put_key" = "$UNRECORDABLE_KEY" ]; then
+  # the three names a version of the script may keep its records under: RESULTS is the one file the
+  # present script uses, the two lists are what the script before the accounting used, and the ones
+  # that are unset are skipped
+  for p in "${RESULTS:-}" "${FAIL_LIST:-}" "${SKIP_LIST:-}"; do
+    [ -n "$p" ] || continue
+    d=${p%/*}
+    case $d in
+      "$TMPDIR"/*) rm -rf -- "$d" ;;
+    esac
+  done
+  echo "stub wrangler: the record directory of the run is gone" >&2
+  exit 1
+fi
+if [ -n "$put_key" ] && [ -n "${KILLED_KEY:-}" ] && [ "$put_key" = "$KILLED_KEY" ]; then
+  if [ "$(cat "/proc/$PPID/comm" 2>/dev/null)" = bash ]; then
+    kill -9 "$PPID"
+  fi
+  exit 0
+fi
 if [ -n "${FAIL_KEYS:-}" ] && [ -f "${FAIL_KEYS:-}" ] \
-  && [ "$1" = r2 ] && [ "$2" = object ] && [ "$3" = put ] \
-  && grep -Fxq -- "${4#pokoin-test-media/}" "$FAIL_KEYS"; then
+  && [ -n "$put_key" ] && grep -Fxq -- "$put_key" "$FAIL_KEYS"; then
   echo "stub wrangler: the put of $4 failed" >&2
   exit 1
 fi
 exit 0
 STUB
+# BASH_ENV is read by every shell bash starts with -c, which is what the xargs children are, so this
+# file makes the child of one key exit 255 before it runs any of the upload code. xargs stops at the
+# first child that exits 255, so the keys after it are never worked at all.
+cat > "$S2/die255.bashenv" <<'BASHENV'
+if [ -n "${DIE255_KEY:-}" ] && [ "${1:-}" = "$DIE255_KEY" ]; then
+  exit 255
+fi
+:
+BASHENV
 chmod +x "$S2"/*
 
 # REAL_NODE is the node the stubs hand everything but the fetch to; the manifest fixtures need it
@@ -755,20 +818,20 @@ fi
 
 # s17 (e). the HEAD sample at the end of the run fails after uploads that all worked: the count
 #          lines are already printed when the sample is attempted, the run still says Done, and the
-#          status is the sample's own, 1, because nothing of a higher code happened. A key the
-#          committed manifest gives no object reports itself but costs nothing, which is what keeps
-#          this run above the 0 of a clean one.
+#          status is the one a sample fetch costs, 5, because nothing of a higher code happened. A
+#          key the committed manifest gives no object reports itself but costs nothing, which is
+#          what keeps this run above the 0 of a clean one.
 fb_keys good.png nothing.png
 fb_store good.png
 fb_manifest good.png "/store/good.png" - nothing.png - -
 fail_keys
 run_fb s17 FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
 err_last="$(printf '%s\n' "$ERR" | tail -1)"
-if [[ "$STATUS" -eq 1 ]] \
+if [[ "$STATUS" -eq 5 ]] \
   && [[ "$err_last" == "$(line_for 1 'key has no object in the manifest' 'keys have no object in the manifest')" ]] \
   && [[ "$ERR" == *"skip (no source): nothing.png"* ]] && [[ "$ERR" != *"failed"* ]] \
   && [[ "$WR_CALLS" -eq 1 ]] && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
-  ok "s17 (e): a failing sample fetch after good uploads: the count line precedes it, the run still says Done, exit 1"
+  ok "s17 (e): a failing sample fetch after good uploads: the count line precedes it, the run still says Done, exit 5"
 else
   bad "s17: status=$STATUS err_last=[$err_last] wrangler=$WR_CALLS out=[$OUT] err=[$ERR]"
 fi
@@ -800,6 +863,376 @@ else
   bad "s17c: status=$STATUS err_last=[$err_last] calls=[$(sort "$CALLS2" 2>/dev/null | tr '\n' '|')] err=[$ERR]"
 fi
 fail_keys
+
+# ---------------------------------------------------------------------------
+# s18..s21: every key handed to xargs is accounted for. The per-key work runs in an xargs child
+# that has no errexit, so the only thing that says a key was worked at all is the record the child
+# writes. Three ways a child can leave that record unwritten: nowhere to write it (s18), a child
+# that exits 255, which stops xargs before the later keys (s19), and a child killed by a signal,
+# which does the same (s20). Today all three end the run without the counts: s18 silently, because
+# the write of the failure record is not checked and the child still returns 0, and s19 and s20
+# loudly, because a nonzero xargs status hits errexit and the script dies at that line.
+# ---------------------------------------------------------------------------
+
+# unaccounted_line <n>: the line the run must print when n of the keys it handed to xargs reported
+# nothing at all.
+unaccounted_line() {
+  if [[ "$1" == "1" ]]; then printf 'unaccounted: 1 key\n'; else printf 'unaccounted: %s keys\n' "$1"; fi
+}
+
+# s18 (a). a failing put whose record cannot be written, because the directory holding the record
+#          files of the run was removed during that put: the key is not accounted for, so the run
+#          says so, prints its counts, still says Done and ends 4 -- never 0.
+fb_keys good.png bad.png
+fb_store good.png bad.png
+fb_manifest good.png "/store/good.png" - bad.png "/store/bad.png" -
+fail_keys
+run_fb s18 PARALLEL=1 UNRECORDABLE_KEY=bad.png
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$ERR" == *"upload failed: bad.png"* ]] \
+  && [[ "$ERR" == *"cannot record result for: bad.png"* ]] \
+  && [[ "$ERR" == *"$(unaccounted_line 2)"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] \
+  && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s18 (a): a failure record that cannot be written: the child says so, the key is counted unaccounted, the counts and Done print, exit 4"
+else
+  bad "s18: status=$STATUS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+
+# s18b. the same with one key only, which is the singular of the unaccounted line.
+fb_keys bad.png
+fb_store bad.png
+fb_manifest bad.png "/store/bad.png" -
+fail_keys
+run_fb s18b PARALLEL=1 UNRECORDABLE_KEY=bad.png
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$ERR" == *"$(unaccounted_line 1)"* ]] && [[ "$ERR" != *"$(unaccounted_line 2)"* ]] \
+  && [[ "$ERR" == *"cannot record result for: bad.png"* ]]; then
+  ok "s18b: one key that recorded nothing prints [$(unaccounted_line 1)], not the plural"
+else
+  bad "s18b: status=$STATUS out=[$OUT] err=[$ERR]"
+fi
+
+# s19 (b). the child of one key exits 255, which makes xargs stop there: the keys after it were
+#          never worked, so they are the unaccounted ones, and the run still prints its counts and
+#          ends 4 instead of dying at the xargs line.
+fb_keys good.png die255.png later.png
+fb_store good.png die255.png later.png
+fb_manifest good.png "/store/good.png" - die255.png "/store/die255.png" - later.png "/store/later.png" -
+run_fb s19 PARALLEL=1 BASH_ENV="$S2/die255.bashenv" DIE255_KEY=die255.png
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$ERR" == *"$(unaccounted_line 2)"* ]] \
+  && [[ "$ERR" == *"xargs status: 124"* ]] \
+  && [[ "$ERR" != *"failed to upload"* ]] && [[ "$ERR" != *"skipped: no source"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s19 (b): a child that exits 255: [$(unaccounted_line 2)] and [xargs status: 124] on stderr, the counts and Done print, exit 4"
+else
+  bad "s19: status=$STATUS wrangler=$WR_CALLS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+
+# s20 (c). the child of one key is killed by a signal during its put, which also stops xargs: that
+#          key and the one after it are unaccounted, and the killed key is neither recorded as done
+#          nor counted as failed, since it never got to say anything.
+fb_keys good.png killed.png later.png
+fb_store good.png killed.png later.png
+fb_manifest good.png "/store/good.png" - killed.png "/store/killed.png" - later.png "/store/later.png" -
+run_fb s20 PARALLEL=1 KILLED_KEY=killed.png
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$ERR" == *"$(unaccounted_line 2)"* ]] \
+  && [[ "$ERR" == *"xargs status: 125"* ]] \
+  && [[ "$ERR" != *"upload failed: killed.png"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] \
+  && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s20 (c): a child killed by a signal: [$(unaccounted_line 2)] and [xargs status: 125] on stderr, the counts and Done print, exit 4"
+else
+  bad "s20: status=$STATUS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+
+# s21 (d). an ordinary mixed run keeps the output PK-C043 gives: one key uploaded, one real skip,
+#          one row the manifest gives no object, one failed put. All of its keys report themselves,
+#          so nothing is unaccounted and the script's own stderr is exactly the per-key lines then
+#          the three counts, in that order. The stub's own line about the failed put is left out of
+#          the comparison.
+fb_keys good.png absent.png nothing.png bad.png
+fb_store good.png bad.png
+fb_manifest good.png "/store/good.png" - absent.png "/store/absent.png" - \
+  nothing.png - - bad.png "/store/bad.png" -
+fail_keys bad.png
+run_fb s21 PARALLEL=1 FAIL_KEYS="$FAIL_KEYS"
+want_err="$(printf '%s\n' 'skip (no source): absent.png' 'skip (no source): nothing.png' \
+  'upload failed: bad.png' \
+  '1 key has no object in the manifest' '1 key skipped: no source' '1 key failed to upload')"
+err_script="$(printf '%s\n' "$ERR" | grep -v '^stub wrangler:' || true)"
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] && [[ "$err_script" == "$want_err" ]] \
+  && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s21 (d): the counts of an ordinary run are exactly the PK-C043 ones, with no unaccounted line and exit 4"
+else
+  bad "s21: status=$STATUS err=[$err_script] want=[$want_err] done=[$DONE_ROWS] out=[$OUT]"
+fi
+
+# ---------------------------------------------------------------------------
+# s22..s24: the done list. A key is looked up in it as data, never as an option (s22), and a forced
+# run rewrites it: the children of that run used to share one temporary file, so eight of them
+# rewriting the list at once lost keys that had never been touched (s24). s23 is the end state a
+# forced run has to give, which the old code already gave as long as one child ran at a time.
+# ---------------------------------------------------------------------------
+
+# force_keys: the eight keys of the forced runs, in the store and in the fixture manifest
+force_rows=()
+force_keys=()
+for i in 1 2 3 4 5 6 7 8; do
+  force_keys+=("k$i.png")
+  force_rows+=("k$i.png" "/store/k$i.png" "-")
+done
+force_store() {
+  rm -f "$TMP/objects2"/*
+  local k
+  for k in "${force_keys[@]}"; do printf x > "$TMP/objects2/$k"; done
+}
+
+# s22. a key whose name starts with a dash is already recorded: the lookup is a data lookup, so the
+#      key is not uploaded again and its row is not written twice.
+fb_keys '-c.png'
+fb_store '-c.png'
+fb_manifest '-c.png' "/store/-c.png" -
+fail_keys
+printf '%s\n' '-c.png' > "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s22 PARALLEL=1
+FB_KEEP_DONE=''
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] && [[ -z "$ERR" ]] \
+  && [[ "$DONE_ROWS" == "-c.png|" ]]; then
+  ok "s22: a key whose name starts with a dash is looked up in the done list as data: not uploaded, recorded once"
+else
+  bad "s22: status=$STATUS wrangler=$WR_CALLS done=[$DONE_ROWS] err=[$ERR]"
+fi
+
+# s23. FORCE=1 over two keys, one of them recorded twice: both go up, and the list holds every key
+#      once, the re-uploaded ones last.
+fb_keys k1.png k2.png
+force_store
+fb_manifest k1.png "/store/k1.png" - k2.png "/store/k2.png" -
+fail_keys
+printf '%s\n' other.png k1.png k1.png > "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s23 PARALLEL=1 FORCE=1
+FB_KEEP_DONE=''
+want_done="$(printf '%s\n' other.png k1.png k2.png)"
+DONE_ROWS="$(cat "$TMP/root/.media-upload.done")"
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 2 ]] && [[ "$DONE_ROWS" == "$want_done" ]]; then
+  ok "s23: FORCE over a recorded key: it uploads again and the done list holds each key once, the forced ones last"
+else
+  bad "s23: status=$STATUS wrangler=$WR_CALLS done=[$(printf '%s\n' "$DONE_ROWS" | tr '\n' '|')] err=[$ERR]"
+fi
+
+# s24. the same with eight forced keys and two hundred rows the run never touches, all eight children
+#      at once: every key of the list is still there, once each. One shared temporary file for the
+#      rewrite is how PK-C043 lost rows of it.
+fb_keys "${force_keys[@]}"
+force_store
+fb_manifest "${force_rows[@]}"
+fail_keys
+{
+  for i in $(seq 1 200); do printf 'fill%s.png\n' "$i"; done
+  for k in "${force_keys[@]}"; do printf '%s\n' "$k"; done
+} > "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s24 FORCE=1 PARALLEL=8
+FB_KEEP_DONE=''
+done_rows="$(grep -c . "$TMP/root/.media-upload.done" || true)"
+done_dups="$(sort "$TMP/root/.media-upload.done" | uniq -d | grep -c '' || true)"
+done_fill="$(grep -c '^fill' "$TMP/root/.media-upload.done" || true)"
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 8 ]] \
+  && [[ "$done_rows" -eq 208 ]] && [[ "$done_dups" -eq 0 ]] && [[ "$done_fill" -eq 200 ]]; then
+  ok "s24: eight forced children leave the two hundred rows they were never given: 208 rows, none twice"
+else
+  bad "s24: status=$STATUS wrangler=$WR_CALLS rows=$done_rows dups=$done_dups fill=$done_fill err=[$ERR]"
+fi
+fail_keys
+
+# ---------------------------------------------------------------------------
+# s25..s31: the key list a rerun was given twice (s25, s26), a done list that will not take the row
+# of a key that uploaded (s27, s27b, s28), a run that cannot read or rewrite what its counts are
+# made of (s29, s30), and a run with nothing to do (s31, s31b). The line that says what xargs ended
+# with, for the two child deaths of s19 and s20, is asserted there.
+# ---------------------------------------------------------------------------
+
+# wrangler_calls_for <key>: how many puts of that key the last run made
+wrangler_calls_for() {
+  if [[ -e "$CALLS2" ]]; then
+    grep -c -- "pokoin-test-media/$1 " "$CALLS2" || true
+  else
+    printf '0\n'
+  fi
+}
+
+# s25 (A). a keys file that lists one key twice: both children report that key, so it accounts for
+#          itself once while the run handed it out twice. The comparison of the two ends 4 with
+#          [unaccounted: 1 key] for a run in which nothing went wrong at all.
+fb_keys dup.png dup.png other.png
+fb_store dup.png other.png
+fb_manifest dup.png "/store/dup.png" - other.png "/store/other.png" -
+run_fb s25 PARALLEL=1
+dup_uploads="$(wrangler_calls_for dup.png)"
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 2"* ]] \
+  && [[ "$ERR" != *"unaccounted"* ]] && [[ "$dup_uploads" -eq 1 ]] && [[ "$WR_CALLS" -eq 2 ]]; then
+  ok "s25 (A): a key listed twice in the keys file is uploaded once, the run says 2 keys and ends 0"
+else
+  bad "s25: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS dup=$dup_uploads err=[$ERR]"
+fi
+
+# s26 (A). the same with the keys taken from the manifest, where the generator can list one key as
+#          two rows: two rows of one key are two keys to process minus one, not three.
+fb_manifest dup.png "/store/dup.png" - other.png "/store/other.png" - dup.png "/store/dup.png" -
+run_fb s26 PARALLEL=1 KEYS_FILE=
+dup_uploads="$(wrangler_calls_for dup.png)"
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 2"* ]] \
+  && [[ "$ERR" != *"unaccounted"* ]] && [[ "$dup_uploads" -eq 1 ]] && [[ "$WR_CALLS" -eq 2 ]]; then
+  ok "s26 (A): a manifest that lists one key twice is 2 keys to process, and the key goes up once"
+else
+  bad "s26: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS dup=$dup_uploads err=[$ERR]"
+fi
+
+# s27 (B). the done list will not take a row, because it is not writable: every key still goes up,
+#          but a rerun of this bucket would put them up again, so the run says so and ends 4.
+fb_keys good.png other.png
+fb_store good.png other.png
+fb_manifest good.png "/store/good.png" - other.png "/store/other.png" -
+printf '%s\n' seed.png > "$TMP/root/.media-upload.done"
+chmod 444 "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s27 PARALLEL=1
+FB_KEEP_DONE=''
+chmod 644 "$TMP/root/.media-upload.done"
+want_not_recorded="$(line_for 2 'key uploaded but not recorded in the done list' \
+  'keys uploaded but not recorded in the done list')"
+if [[ "$STATUS" -eq 4 ]] && [[ "$ERR" == *"done list not writable: good.png"* ]] \
+  && [[ "$ERR" == *"done list not writable: other.png"* ]] && [[ "$ERR" == *"$want_not_recorded"* ]] \
+  && [[ "$ERR" != *"unaccounted"* ]] && [[ "$WR_CALLS" -eq 2 ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] \
+  && [[ "$(cat "$TMP/root/.media-upload.done")" == "seed.png" ]]; then
+  ok "s27 (B): an unwritable done list: both keys upload, each says [done list not writable], [$want_not_recorded] and exit 4"
+else
+  bad "s27: status=$STATUS wrangler=$WR_CALLS done=[$(cat "$TMP/root/.media-upload.done")] err=[$ERR]"
+fi
+
+# s27b. the same with one key, which is the singular of that line, and a manifest null row beside it
+#       so the other counts keep their places.
+fb_keys bad1.png nothing.png
+fb_store bad1.png
+fb_manifest bad1.png "/store/bad1.png" - nothing.png - -
+printf '%s\n' seed.png > "$TMP/root/.media-upload.done"
+chmod 444 "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s27b PARALLEL=1
+FB_KEEP_DONE=''
+chmod 644 "$TMP/root/.media-upload.done"
+want_one="$(line_for 1 'key uploaded but not recorded in the done list' \
+  'keys uploaded but not recorded in the done list')"
+if [[ "$STATUS" -eq 4 ]] && [[ "$ERR" == *"$want_one"* ]] && [[ "$ERR" != *"$want_not_recorded"* ]] \
+  && [[ "$ERR" == *"1 key has no object in the manifest"* ]] \
+  && [[ "$ERR" != *"unaccounted"* ]] && [[ "$ERR" != *"skipped: no source"* ]]; then
+  ok "s27b: one key that could not be recorded prints [$want_one], not the plural, and the null row keeps its own line"
+else
+  bad "s27b: status=$STATUS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s28. the done-list path is a directory: the append cannot work either, and the run must not read
+#      it as an empty list and end 0.
+fb_keys good.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" -
+rm -f "$TMP/root/.media-upload.done"
+mkdir -p "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s28 PARALLEL=1
+FB_KEEP_DONE=''
+rmdir "$TMP/root/.media-upload.done"
+if [[ "$STATUS" -eq 4 ]] && [[ "$ERR" == *"done list not writable: good.png"* ]] \
+  && [[ "$ERR" == *"$want_one"* ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+  ok "s28: a done list that is a directory: the key uploads, the run says it recorded nothing and ends 4"
+else
+  bad "s28: status=$STATUS wrangler=$WR_CALLS err=[$ERR] out=[$OUT]"
+fi
+
+# s29 (D). the node call that reads the manifest rows for the counts fails. The counts of the keys
+#          that reported are already known, so the run must print them, say what it could not read,
+#          and end 4 instead of dying at that line with no report at all.
+fb_keys good.png absent.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" - absent.png "/store/absent.png" -
+run_fb s29 PARALLEL=1 NULL_ROWS_FAIL=1
+if [[ "$STATUS" -eq 4 ]] && [[ "$ERR" == *"could not read the manifest rows"* ]] \
+  && [[ "$ERR" == *"1 key skipped: no source"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+  ok "s29 (D): a failing manifest-rows read: the counts still print, [could not read the manifest rows] says why, exit 4"
+else
+  bad "s29: status=$STATUS err=[$ERR] out=[$OUT]"
+fi
+
+# s30 (D). a forced run whose done-list rewrite cannot work, because nothing new can be created in
+#          the directory of the list: the children had already appended their keys, so the list is
+#          left with the duplicates and the run says it could not rewrite it.
+fb_keys "${force_keys[0]}" "${force_keys[1]}"
+force_store
+fb_manifest "${force_keys[0]}" "/store/${force_keys[0]}" - "${force_keys[1]}" "/store/${force_keys[1]}" -
+{
+  printf '%s\n' seed.png
+  printf '%s\n' "${force_keys[0]}"
+} > "$TMP/root/.media-upload.done"
+chmod 555 "$TMP/root"
+FB_KEEP_DONE=1
+run_fb s30 PARALLEL=1 FORCE=1
+FB_KEEP_DONE=''
+chmod 755 "$TMP/root"
+done_rows_after="$(grep -c . "$TMP/root/.media-upload.done" || true)"
+rm -f "$TMP/root/.media-upload.done.tmp"
+if [[ "$STATUS" -eq 4 ]] && [[ "$ERR" == *"could not rewrite the done list"* ]] \
+  && [[ "$WR_CALLS" -eq 2 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] && [[ "$done_rows_after" -eq 4 ]]; then
+  ok "s30 (D): a done list that cannot be rewritten: the rows the children appended stay, [could not rewrite the done list] prints, exit 4"
+else
+  bad "s30: status=$STATUS wrangler=$WR_CALLS rows=$done_rows_after err=[$ERR] out=[$OUT]"
+fi
+
+# s31 (E). nothing to process at all: the keys file is empty. That is the ordinary state of a bucket
+#          that is fully uploaded with nothing recorded yet, and it ends 0 with an empty stderr --
+#          no count line and no unaccounted line. This case pins what the script already does.
+fb_manifest nothing.png - -
+fb_store
+: > "$FB_KEYS"
+run_fb s31
+if [[ "$STATUS" -eq 0 ]] && [[ -z "$ERR" ]] && [[ "$OUT" == *"Keys to process: 0"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] && [[ ! -e "$CALLS2" ]]; then
+  ok "s31 (E): an empty keys file ends 0, with [Keys to process: 0] and nothing on stderr"
+else
+  bad "s31: status=$STATUS err=[$ERR] out=[$OUT]"
+fi
+
+# s31b. the same with two keys, both already recorded: the run uploads nothing and says nothing, and
+#       the list keeps the rows it already had.
+fb_keys good.png other.png
+fb_store good.png other.png
+fb_manifest good.png "/store/good.png" - other.png "/store/other.png" -
+printf '%s\n' good.png other.png > "$TMP/root/.media-upload.done"
+FB_KEEP_DONE=1
+run_fb s31b PARALLEL=1
+FB_KEEP_DONE=''
+if [[ "$STATUS" -eq 0 ]] && [[ -z "$ERR" ]] && [[ "$WR_CALLS" -eq 0 ]] \
+  && [[ "$OUT" == *"Keys to process: 2"* ]] \
+  && [[ "$(cat "$TMP/root/.media-upload.done")" == "$(printf '%s\n' good.png other.png)" ]]; then
+  ok "s31b: keys that are all recorded already end 0 with no stderr and no put"
+else
+  bad "s31b: status=$STATUS wrangler=$WR_CALLS err=[$ERR] done=[$(cat "$TMP/root/.media-upload.done")]"
+fi
 
 # s12. the repository-wide check runs as a step of this suite, so its failure fails the suite
 hfail=0
