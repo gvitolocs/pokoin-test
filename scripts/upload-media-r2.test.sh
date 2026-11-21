@@ -590,6 +590,33 @@ else
   bad "s9: status=$STATUS wrangler=$WR_CALLS calls=[$(cat "$CALLS2" 2>/dev/null)] err=[$ERR]"
 fi
 
+# s10. the host pattern is plain ASCII, its at-sign is the ASCII one, and user@host is accepted
+pattern_ascii() {
+  local file="$1" line n
+  line="$(grep -F 'A-Za-z0-9' "$file")" || return 1
+  n="$(printf '%s\n' "$line" | grep -c .)"
+  if [[ "$n" -ne 1 ]]; then return 1; fi
+  if LC_ALL=C grep -q '[^ -~]' <<<"$line"; then return 1; fi
+  [[ "$(printf '%s' "$line" | tr -cd '@' | wc -c)" -ge 1 ]]
+}
+for pattern_file in "$SRC" "$HERE/media-manifest.mjs"; do
+  if pattern_ascii "$pattern_file"; then
+    ok "s10 (E): the host pattern of $(basename "$pattern_file") is one line of plain ASCII with an ASCII @"
+  else
+    bad "s10: the host pattern of $pattern_file is missing, ambiguous or not plain ASCII"
+  fi
+done
+fb_keys b.png
+fb_store
+fb_manifest b.png "/store/b.png" -
+run_fb s10 POKOIN_MEDIA_FALLBACK_HOST='user@host'
+if [[ "$STATUS" -eq 0 ]] && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$ERR" != *"invalid"* ]] \
+  && grep -Fxq -- '--' "$SSH_LOG" && grep -Fxq 'user@host' "$SSH_LOG"; then
+  ok "s10 (E): the ASCII value user@host is accepted and reaches ssh after the --"
+else
+  bad "s10: value user@host status=$STATUS ssh=$SSH_CALLS ssh_log=[$(cat "$SSH_LOG" 2>/dev/null)] err=[$ERR]"
+fi
+
 # s11. the credentials loader block is delimited by exactly one begin and one end marker line
 begin_n="$(awk '/^# --- credentials loader: begin$/{n++} END{print n+0}' "$SRC")"
 end_n="$(awk '/^# --- credentials loader: end$/{n++} END{print n+0}' "$SRC")"
