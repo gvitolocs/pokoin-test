@@ -5,13 +5,14 @@
  *   POKOIN_OBJECTS=/path/to/object/store node scripts/media-manifest.mjs
  *
  * POKOIN_OBJECTS is the directory that holds the media objects; the manifest records every key
- * relative to it and never the directory itself. Optional: POKOIN_MEDIA_FALLBACK_HOST, the ssh host
- * that holds objects missing from the local store, and with it POKOIN_MEDIA_FALLBACK_OBJECTS, the
- * directory on that host the keys are relative to. A host with no remote directory behind it ends the
- * run 2; with no host neither is asked for, and the tree names neither of them. A remote directory that
- * is not an absolute path of plain characters, with no step out of itself, ends the run 2 too, before a
- * catalog is fetched: the keys go over under it as one quoted word, and a name of that shape is a
- * mistyped path rather than a place.
+ * relative to it and never the directory itself. A value that is not a directory which is there ends the
+ * run 2 with the line the upload script prints, before a catalog is fetched. Optional:
+ * POKOIN_MEDIA_FALLBACK_HOST, the ssh host that holds objects missing from the local store, and with it
+ * POKOIN_MEDIA_FALLBACK_OBJECTS, the directory on that host the keys are relative to. A host with no
+ * remote directory behind it ends the run 2; with no host neither is asked for, and the tree names
+ * neither of them. A remote directory that is not an absolute path of plain characters, with no step out
+ * of itself, ends the run 2 too, before a catalog is fetched: the keys go over under it as one quoted
+ * word, and a name of that shape is a mistyped path rather than a place.
  */
 
 import { createHash } from 'node:crypto';
@@ -22,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 import { collectMediaKeys } from './media-collect.mjs';
-import { assertNoHost, assertNoLeaks } from './media-manifest-guard.mjs';
+import { assertDirectory, assertNoHost, assertNoLeaks } from './media-manifest-guard.mjs';
 import { MEDIA_BASE } from '../src/lib/media.js';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
@@ -70,6 +71,16 @@ if (PI_OBJECTS && !(
 // told would hash the files of whatever directory its name happens to match
 if (!LOCAL_OBJECTS) {
   console.error('set POKOIN_OBJECTS to the directory that holds the media objects');
+  process.exit(2);
+}
+// a name that is not there, or that holds a file, cannot give up any object: it would be read as a store
+// with nothing in it, and every key of the list would come back missing from the media. The upload script
+// has held this rule for its own run; the check stands in the guard module, where a test can ask it what
+// it does without running this file, which is never run by one.
+try {
+  assertDirectory(LOCAL_OBJECTS);
+} catch {
+  console.error('POKOIN_OBJECTS is not a directory');
   process.exit(2);
 }
 const LEGACY_CATALOG = 'https://cdn.pokoin.com/poko-video/newpoko/catalog.json';
