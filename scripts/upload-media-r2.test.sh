@@ -180,17 +180,31 @@ else
   bad "h: status=$STATUS err=[$ERR]"
 fi
 
-# i. the credentials file runs set +e: errexit stays on. The run reaches the upload (wrangler stub
-#    called, no preflight text), and a failing node stub at the end stops the script before the
-#    final line.
+# i. the credentials file runs set +e: errexit stays on. No node call can show that any more, because
+#    every one of them has a captured status since the accounting, so the step that makes sure the
+#    done list exists is the one that ends the run: the directory of the list will not take a new
+#    file, and the run stops there, before the upload and before the final line.
 H="$(mk_home home-i)"
 write_creds "$H" "set +e"
-run_case i "$H" NODE_FAIL=1
-if [[ "$STATUS" -ne 0 ]] && [[ -e "$CALLS" ]] && [[ "$ERR" != *"must be set"* ]] \
-  && ! grep -q "^Done" "$TMP/out"; then
+rm -f "$TMP/root/.media-upload.done"
+chmod 555 "$TMP/root"
+run_case i "$H"
+chmod 755 "$TMP/root"
+if [[ "$STATUS" -eq 1 ]] && [[ "$ERR" == *"Permission denied"* ]] && [[ ! -e "$CALLS" ]] \
+  && [[ "$ERR" != *"must be set"* ]] && ! grep -q "^Done" "$TMP/out"; then
   ok "i: errexit still on after the credentials file ran set +e"
 else
   bad "i: status=$STATUS err=[$ERR] out=[$(cat "$TMP/out")]"
+fi
+
+# i2. a run whose node cannot read the manifest rows reports it instead of dying there: the counts,
+#     the Done line and exit 4, with the line that names the step that failed.
+run_case i2 "$H" NODE_FAIL=1
+if [[ "$STATUS" -eq 4 ]] && [[ "$ERR" == *"could not read the manifest rows"* ]] \
+  && grep -q "^Done" "$TMP/out"; then
+  ok "i2: a failing manifest-row read is reported and ends 4, it does not stop the run"
+else
+  bad "i2: status=$STATUS err=[$ERR] out=[$(cat "$TMP/out")]"
 fi
 
 # l. allexport is off again after the loader: a variable the script defines is not exported
@@ -1181,7 +1195,7 @@ rm -f "$TMP/root/.media-upload.done.tmp"
 if [[ "$STATUS" -eq 4 ]] && [[ "$ERR" == *"could not rewrite the done list"* ]] \
   && [[ "$WR_CALLS" -eq 2 ]] && [[ "$ERR" != *"unaccounted"* ]] \
   && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] && [[ "$done_rows_after" -eq 4 ]]; then
-  ok "s30 (C): a done list that cannot be rewritten: the rows the children appended stay, [could not rewrite the done list] prints, exit 4"
+  ok "s30 (D): a done list that cannot be rewritten: the rows the children appended stay, [could not rewrite the done list] prints, exit 4"
 else
   bad "s30: status=$STATUS wrangler=$WR_CALLS rows=$done_rows_after err=[$ERR] out=[$OUT]"
 fi
