@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Tests for scripts/upload-media-r2.sh credential loading and preflight.
+# Tests for scripts/upload-media-r2.sh: credential loading and preflight, the fallback host, the
+# keys skipped for want of a source; and scripts/no-host-names.test.sh as one of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
 set -euo pipefail
 
 SRC="${1:-$(cd "$(dirname "$0")" && pwd)/upload-media-r2.sh}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
 DUMMY_TOKEN="dummy-token-for-test"
 DUMMY_ACCOUNT="dummy-account-for-test"
 
@@ -429,6 +431,15 @@ if [[ "$begin_n" == "1" && "$end_n" == "1" ]]; then
   ok "s6 (e): exactly one loader begin marker and one loader end marker"
 else
   bad "s6: begin markers=$begin_n end markers=$end_n"
+fi
+
+# s7. the repository-wide check runs as a step of this suite, so its failure fails the suite
+hfail=0
+hout="$(bash "$HERE/no-host-names.test.sh" 2>&1)" || hfail=1
+if [[ "$hfail" -eq 0 ]] && [[ "$hout" == *"all passed"* ]]; then
+  ok "s7: scripts/no-host-names.test.sh passes and is a step of this suite"
+else
+  bad "s7: scripts/no-host-names.test.sh failed (rc=$hfail): $(printf '%s\n' "$hout" | grep -v '^ok: ' | head -5)"
 fi
 
 if [[ -e "$TMP/forbidden.calls" ]]; then

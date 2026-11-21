@@ -52,7 +52,18 @@ Upload from the machine that holds the media objects (the script loads the Cloud
 ./scripts/upload-media-r2.sh
 ```
 
-Both media scripts take one optional variable, `POKOIN_MEDIA_FALLBACK_HOST`: the ssh host that holds media objects missing from the local store. Unset (the default) means no fallback — `scripts/media-manifest.mjs` then records such a key with no source, and `scripts/upload-media-r2.sh` reports it as having no source instead of fetching it.
+Both media scripts take one optional variable, `POKOIN_MEDIA_FALLBACK_HOST`: the ssh host that holds media objects missing from the local store. The value has to be a plain host token — letters, digits and `.` `_` `-` `:` `@`, not starting with a dash — otherwise both scripts print `invalid POKOIN_MEDIA_FALLBACK_HOST`, exit 2 and make no ssh or scp call at all. Unset (the default) means no fallback: `scripts/media-manifest.mjs` then records such a key with no source, and `scripts/upload-media-r2.sh` reports each one as having no source instead of fetching it, prints `N keys skipped: no source` on stderr once the whole list has been worked through, and exits 3 so a partial upload is not mistaken for a complete one.
+
+### Tests
+
+This repository has no CI, so the two script tests run by hand from a clone:
+
+```bash
+bash scripts/upload-media-r2.test.sh   # the upload script, against stub ssh / scp / wrangler / node and a temporary HOME
+bash scripts/no-host-names.test.sh     # no tracked file of the repository names a retired machine
+```
+
+`scripts/upload-media-r2.test.sh` takes the path of the script under test as its only argument (default: its sibling `upload-media-r2.sh`), uploads nothing and reads no credential file, and it runs `scripts/no-host-names.test.sh` as one of its own steps, so that first command covers both tests. `scripts/no-host-names.test.sh` needs only bash, git and tar. `npm test` covers the app, not these two scripts.
 
 Do not commit `.media-upload.done`.
 
