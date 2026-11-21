@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Tests for scripts/upload-media-r2.sh: credential loading and preflight, the object directory it has
-# to be told about, the fallback host, the keys skipped for want of a source, the upload whose
+# Tests for scripts/upload-media-r2.sh: credential loading and preflight, the object directory it
+# has to be told about, the fallback host, the keys skipped for want of a source, the upload whose
 # wrangler call fails, the keys a run failed to account for, the key that is listed twice and the one
-# it cannot record in the done list; and scripts/no-host-names.test.sh as one of its own steps.
+# it cannot record in the done list; and scripts/no-host-names.test.sh and
+# scripts/media-manifest-guard.test.sh as two of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
 set -euo pipefail
@@ -1305,6 +1306,16 @@ if [[ "$hfail" -eq 0 ]] && [[ "$hout" == *"all passed"* ]]; then
   ok "s12: scripts/no-host-names.test.sh passes and is a step of this suite"
 else
   bad "s12: scripts/no-host-names.test.sh failed (rc=$hfail): $(printf '%s\n' "$hout" | grep -v '^ok: ' | head -5)"
+fi
+
+# s32. the manifest guard runs as a step of this suite for the same reason: the generator it checks is
+#      the one that writes the media-manifest.json this suite reads
+gfail=0
+gout="$(bash "$HERE/media-manifest-guard.test.sh" 2>&1)" || gfail=1
+if [[ "$gfail" -eq 0 ]] && [[ "$gout" == *"all passed"* ]]; then
+  ok "s32: scripts/media-manifest-guard.test.sh passes and is a step of this suite"
+else
+  bad "s32: scripts/media-manifest-guard.test.sh failed (rc=$gfail): $(printf '%s\n' "$gout" | grep -v '^ok: ' | head -5)"
 fi
 
 if [[ -e "$TMP/forbidden.calls" ]]; then

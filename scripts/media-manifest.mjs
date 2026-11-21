@@ -2,7 +2,11 @@
 /**
  * Build media-manifest.json: every object key the boards can request, with local hashes.
  *
- *   node scripts/media-manifest.mjs
+ *   POKOIN_OBJECTS=/path/to/object/store node scripts/media-manifest.mjs
+ *
+ * POKOIN_OBJECTS is the directory that holds the media objects; the manifest records every key
+ * relative to it and never the directory itself. Optional: POKOIN_MEDIA_FALLBACK_HOST, the ssh host
+ * that holds objects missing from the local store.
  */
 
 import { createHash } from 'node:crypto';
@@ -13,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 import { collectMediaKeys } from './media-collect.mjs';
+import { assertNoHost } from './media-manifest-guard.mjs';
 import { MEDIA_BASE } from '../src/lib/media.js';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
@@ -24,13 +29,19 @@ function loadAliases() {
   return JSON.parse(readFileSync(ALIASES_PATH, 'utf8'));
 }
 
-const LOCAL_OBJECTS = '/home/nez/data/pokoin-leftovers/objects';
+const LOCAL_OBJECTS = process.env.POKOIN_OBJECTS || '';
 const PI_OBJECTS = '/srv/pokoin/card-images/objects';
 const PI_HOST = process.env.POKOIN_MEDIA_FALLBACK_HOST || '';
 // the host reaches ssh as one argument, so it must not start with a dash nor hold a space or
 // another shell character; nothing is looked up before it is accepted
 if (PI_HOST && !/^[A-Za-z0-9][A-Za-z0-9._@:-]*$/.test(PI_HOST)) {
   console.error('invalid POKOIN_MEDIA_FALLBACK_HOST');
+  process.exit(2);
+}
+// the store is where the operator keeps it, and the tree holds no guess at it: a run that was not
+// told would hash the files of whatever directory its name happens to match
+if (!LOCAL_OBJECTS) {
+  console.error('set POKOIN_OBJECTS to the directory that holds the media objects');
   process.exit(2);
 }
 const LEGACY_CATALOG = 'https://cdn.pokoin.com/poko-video/newpoko/catalog.json';
@@ -77,15 +88,17 @@ function piKeysPresent(keys) {
   });
 }
 
+// the key of a resolution is the name the object store holds the file under, which on an alias row
+// is the alias target and not the key of the row
 function resolveSource(key, piPresent) {
   const local = join(LOCAL_OBJECTS, key);
   if (existsSync(local) && statSync(local).isFile()) {
-    return { path: local, source: 'local' };
+    return { path: local, key, source: 'local' };
   }
   if (piPresent.has(key)) {
-    return { path: `ssh:${PI_HOST}:${PI_OBJECTS}/${key}`, source: 'fallback' };
+    return { path: `ssh:${PI_HOST}:${PI_OBJECTS}/${key}`, key, source: 'fallback' };
   }
-  return { path: '', source: '' };
+  return { path: '', key: '', source: '' };
 }
 
 async function fileMeta(resolved) {
@@ -135,7 +148,7 @@ async function main() {
       const row = {
         key,
         sources: [...keyMap.get(key)].sort(),
-        object: resolved.path || null,
+        object: resolved.key || null,
         objectStore: resolved.source || null,
         size: meta.size,
         sha256: meta.sha256,
@@ -178,7 +191,15 @@ async function main() {
     entries,
   };
 
-  writeFileSync(OUT, `${JSON.stringify(manifest, null, 2)}\n`);
+  const text = `${JSON.stringify(manifest, null, 2)}\n`;
+  // the check runs on the string that is about to become the file, before anything is written
+  try {
+    assertNoHost(text, PI_HOST);
+  } catch {
+    console.error('refusing to write a manifest that names the fallback host');
+    process.exit(1);
+  }
+  writeFileSync(OUT, text);
 
   const mb = (totalBytes / (1024 * 1024)).toFixed(2);
   console.log(`Wrote ${OUT}`);
