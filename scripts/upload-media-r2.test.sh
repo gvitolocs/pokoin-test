@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/upload-media-r2.sh: credential loading and preflight, the fallback host, the
-# keys skipped for want of a source; and scripts/no-host-names.test.sh as one of its own steps.
+# keys skipped for want of a source, the upload whose wrangler call fails; and
+# scripts/no-host-names.test.sh as one of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
 set -euo pipefail
@@ -321,14 +322,26 @@ cat > "$S2/node" <<'STUB'
 #!/bin/sh
 if [ "$1" = "-e" ]; then
   case "$2" in
-    *"method: 'HEAD'"*) exit 0 ;;
+    *"method: 'HEAD'"*)
+      # SAMPLE_FAIL=1 is the case of a sample fetch that does not come back
+      if [ -n "${SAMPLE_FAIL:-}" ]; then exit 1; fi
+      exit 0 ;;
   esac
 fi
 exec "$REAL_NODE" "$@"
 STUB
+# The put of a key named in the FAIL_KEYS file fails, so a run can be shown what a failed wrangler
+# call does; the file is absent or empty when every upload is meant to succeed. The fourth argument
+# of a put is the target, bucket/key.
 cat > "$S2/wrangler" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >> "$CALLS2"
+if [ -n "${FAIL_KEYS:-}" ] && [ -f "${FAIL_KEYS:-}" ] \
+  && [ "$1" = r2 ] && [ "$2" = object ] && [ "$3" = put ] \
+  && grep -Fxq -- "${4#pokoin-test-media/}" "$FAIL_KEYS"; then
+  echo "stub wrangler: the put of $4 failed" >&2
+  exit 1
+fi
 exit 0
 STUB
 chmod +x "$S2"/*
@@ -378,10 +391,12 @@ line_for() {
 }
 
 # run_fb <name> [extra env assignments...]: like run_case, with the recording stubs; sets STATUS,
-# ERR, OUT and the number of ssh, scp and wrangler calls of the run
+# ERR, OUT and the number of ssh, scp and wrangler calls of the run. FB_KEEP_DONE=1 leaves the done
+# list of the previous run in place, which is what a rerun is.
 run_fb() {
   shift
-  rm -f "$SSH_LOG" "$SCP_LOG" "$CALLS2" "$TMP/root/.media-upload.done"
+  rm -f "$SSH_LOG" "$SCP_LOG" "$CALLS2"
+  if [[ "${FB_KEEP_DONE:-}" != "1" ]]; then rm -f "$TMP/root/.media-upload.done"; fi
   printf '%s\n' "${FB_ALIASES:-$FB_ALIASES_DEFAULT}" > "$TMP/root/media-aliases.json"
   set +e
   env -i PATH="$S2:/usr/bin:/bin" HOME="$TMP/home-fb" TMPDIR="$TMP/scratch" \
@@ -625,6 +640,166 @@ if [[ "$begin_n" == "1" && "$end_n" == "1" ]]; then
 else
   bad "s11: begin markers=$begin_n end markers=$end_n"
 fi
+
+# ---------------------------------------------------------------------------
+# s13..s17: an upload that fails. The wrangler stub of this section refuses the put of every key
+# named in the FAIL_KEYS file. The per-key work runs in an xargs child bash that has no errexit, so
+# a failed put ran on into the done list: the key was recorded as uploaded, a rerun never retried
+# it, and the whole run ended 0.
+# ---------------------------------------------------------------------------
+FAIL_KEYS="$TMP/wrangler-fail-keys"
+
+# fail_keys [key]...: the keys whose wrangler put fails from now on; with no argument the stub is
+# fixed again, which is what the rerun of s14 needs.
+fail_keys() {
+  : > "$FAIL_KEYS"
+  local k
+  for k in "$@"; do printf '%s\n' "$k" >> "$FAIL_KEYS"; done
+}
+
+# done_list: the done list of the last run, sorted, or a word for its absence
+done_list() {
+  if [[ -e "$TMP/root/.media-upload.done" ]]; then
+    sort "$TMP/root/.media-upload.done"
+  else
+    printf '(none)\n'
+  fi
+}
+
+# s13 (a). one key whose wrangler call fails and one that succeeds: the run exits 4, says how many
+#          failed in its last stderr line, and the done list holds the good key alone
+fb_keys good.png bad.png
+fb_store good.png bad.png
+fb_manifest good.png "/store/good.png" - bad.png "/store/bad.png" -
+fail_keys bad.png
+run_fb s13 FAIL_KEYS="$FAIL_KEYS"
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$err_last" == "$(line_for 1 'key failed to upload' 'keys failed to upload')" ]] \
+  && [[ "$ERR" == *"upload failed: bad.png"* ]] && [[ "$ERR" != *"upload failed: good.png"* ]] \
+  && [[ "$WR_CALLS" -eq 2 ]] && grep -q 'pokoin-test-media/good\.png' "$CALLS2" \
+  && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s13 (a): a failed put: exit 4, [1 key failed to upload] as the last line, the good key uploaded and recorded, the failed key not recorded"
+else
+  bad "s13: status=$STATUS err_last=[$err_last] wrangler=$WR_CALLS done=[$DONE_ROWS] calls=[$(sort "$CALLS2" 2>/dev/null | tr '\n' '|')] err=[$ERR]"
+fi
+
+# s14 (b). the same run again with the stub fixed: the key that failed was not recorded as done, so
+#          the rerun uploads it, the recorded one is not uploaded twice, and the run ends 0
+fail_keys
+FB_KEEP_DONE=1
+run_fb s14 FAIL_KEYS="$FAIL_KEYS"
+FB_KEEP_DONE=""
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/bad\.png' "$CALLS2" \
+  && [[ "$ERR" != *"failed to upload"* ]] && [[ "$ERR" != *"upload failed"* ]] \
+  && [[ "$DONE_ROWS" == "bad.png|good.png|" ]]; then
+  ok "s14 (b): a rerun with the stub fixed uploads the key that had failed, does not re-upload the recorded one, and exits 0"
+else
+  bad "s14: status=$STATUS wrangler=$WR_CALLS done=[$DONE_ROWS] calls=[$(sort "$CALLS2" 2>/dev/null | tr '\n' '|')] err=[$ERR]"
+fi
+
+# s15 (c). two failed uploads and a real skip in one list: both count lines, in the order of the
+#          summary, and the failure outranks the skip's 3
+fb_keys good.png bad1.png bad2.png absent.png
+fb_store good.png bad1.png bad2.png
+fb_manifest good.png "/store/good.png" - bad1.png "/store/bad1.png" - \
+  bad2.png "/store/bad2.png" - absent.png "/store/absent.png" -
+fail_keys bad1.png bad2.png
+run_fb s15 FAIL_KEYS="$FAIL_KEYS"
+err_tail="$(printf '%s\n' "$ERR" | tail -2 | tr '\n' '|')"
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$err_tail" == "1 key skipped: no source|2 keys failed to upload|" ]] \
+  && [[ "$ERR" == *"upload failed: bad1.png"* ]] && [[ "$ERR" == *"upload failed: bad2.png"* ]] \
+  && [[ "$ERR" == *"skip (no source): absent.png"* ]] \
+  && [[ "$ERR" != *"no object in the manifest"* ]] \
+  && [[ "$WR_CALLS" -eq 3 ]] \
+  && [[ "$DONE_ROWS" == "good.png|" ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+  ok "s15 (c): two failed uploads with a skip: the skip line then the plural failure line, exit 4 for the failure, only the good key recorded"
+else
+  bad "s15: status=$STATUS err_tail=[$err_tail] wrangler=$WR_CALLS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+
+# s16 (d). nothing failing: the exit status and the output are exactly the ones of today, both for
+#          a list that uploads whole and for one with a real skip in it
+fb_keys good.png other.png
+fb_store good.png other.png
+fb_manifest good.png "/store/good.png" - other.png "/store/other.png" -
+fail_keys
+run_fb s16 FAIL_KEYS="$FAIL_KEYS"
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 2 ]] \
+  && [[ -z "$ERR" ]] && [[ "$DONE_ROWS" == "good.png|other.png|" ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+  ok "s16 (d): all uploads fine: exit 0, nothing on stderr, both keys recorded, the usual lines on stdout"
+else
+  bad "s16: status=$STATUS wrangler=$WR_CALLS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+fb_keys good.png absent.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" - absent.png "/store/absent.png" -
+run_fb s16b FAIL_KEYS="$FAIL_KEYS"
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 3 ]] && [[ "$err_last" == "1 key skipped: no source" ]] \
+  && [[ "$ERR" != *"failed"* ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s16 (d): a real skip on its own still costs 3, with its own line and no failure line"
+else
+  bad "s16b: status=$STATUS err_last=[$err_last] wrangler=$WR_CALLS done=[$DONE_ROWS] err=[$ERR]"
+fi
+
+# s17 (e). the HEAD sample at the end of the run fails after uploads that all worked: the count
+#          lines are already printed when the sample is attempted, the run still says Done, and the
+#          status is the sample's own, 1, because nothing of a higher code happened. A key the
+#          committed manifest gives no object reports itself but costs nothing, which is what keeps
+#          this run above the 0 of a clean one.
+fb_keys good.png nothing.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" - nothing.png - -
+fail_keys
+run_fb s17 FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+if [[ "$STATUS" -eq 1 ]] \
+  && [[ "$err_last" == "$(line_for 1 'key has no object in the manifest' 'keys have no object in the manifest')" ]] \
+  && [[ "$ERR" == *"skip (no source): nothing.png"* ]] && [[ "$ERR" != *"failed"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+  ok "s17 (e): a failing sample fetch after good uploads: the count line precedes it, the run still says Done, exit 1"
+else
+  bad "s17: status=$STATUS err_last=[$err_last] wrangler=$WR_CALLS out=[$OUT] err=[$ERR]"
+fi
+
+# a real skip outranks the sample's status: 3, with its line already printed
+fb_keys good.png absent.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" - absent.png "/store/absent.png" -
+run_fb s17b FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+if [[ "$STATUS" -eq 3 ]] && [[ "$err_last" == "1 key skipped: no source" ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+  ok "s17 (e): a failing sample fetch with a real skip: exit 3, the skip outranks the sample"
+else
+  bad "s17b: status=$STATUS err_last=[$err_last] out=[$OUT] err=[$ERR]"
+fi
+
+# a failed upload outranks both
+fb_keys good.png bad.png
+fb_store good.png bad.png
+fb_manifest good.png "/store/good.png" - bad.png "/store/bad.png" -
+fail_keys bad.png
+run_fb s17c FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+if [[ "$STATUS" -eq 4 ]] && [[ "$err_last" == "1 key failed to upload" ]] \
+  && grep -q 'pokoin-test-media/good\.png' "$CALLS2"; then
+  ok "s17 (e): a failed upload with a failing sample fetch: exit 4, the failure line last"
+else
+  bad "s17c: status=$STATUS err_last=[$err_last] calls=[$(sort "$CALLS2" 2>/dev/null | tr '\n' '|')] err=[$ERR]"
+fi
+fail_keys
 
 # s12. the repository-wide check runs as a step of this suite, so its failure fails the suite
 hfail=0

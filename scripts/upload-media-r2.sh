@@ -71,12 +71,14 @@ fi
 
 touch "$DONE"
 
-# the keys with no source are found by the xargs children, which share no variable with this shell,
-# so each of them appends to a file in a private temporary directory
+# the keys with no source and the keys whose upload failed are found by the xargs children, which
+# share no variable with this shell, so each of them appends to a file in a private temporary
+# directory
 WORK="$(mktemp -d -p "${TMPDIR:-/tmp}" "upload-media-r2.XXXXXX")"
 trap 'rm -rf -- "${WORK}"' EXIT
 SKIP_LIST="${WORK}/no-source"
-export SKIP_LIST
+FAIL_LIST="${WORK}/upload-failed"
+export SKIP_LIST FAIL_LIST
 
 if [[ -n "${KEYS_FILE:-}" ]]; then
   mapfile -t KEYS < <(grep -v '^[[:space:]]*$' "$KEYS_FILE" | grep -v '^#')
@@ -163,7 +165,17 @@ upload_one() {
   if [[ -n "$ct" ]]; then
     put_args+=(--content-type "$ct")
   fi
-  "$WRANGLER" "${put_args[@]}"
+  # this runs in the xargs child, where errexit is never on, so the exit status of the call is the
+  # only thing that says whether the object went up: a failed put is recorded apart and the key is
+  # not added to the done list, which a rerun then retries
+  local put_status=0
+  "$WRANGLER" "${put_args[@]}" || put_status=$?
+  if [[ "$put_status" -ne 0 ]]; then
+    echo "upload failed: $key" >&2
+    printf '%s\n' "$key" >> "$FAIL_LIST"
+    if [[ -n "$tmp_cleanup" ]]; then rm -f "$tmp_cleanup"; fi
+    return 0
+  fi
   if [[ "$FORCE" == "1" ]]; then
     grep -Fxv "$key" "$DONE" > "${DONE}.tmp" 2>/dev/null || true
     mv "${DONE}.tmp" "$DONE"
@@ -181,25 +193,10 @@ export -f resolve_file upload_one alias_for content_type_for
 echo "Uploading with $WRANGLER (parallel ${PARALLEL})…"
 printf '%s\n' "${KEYS[@]}" | xargs -P "$PARALLEL" -I {} bash -c 'upload_one "$@"' _ {}
 
-SAMPLE_COUNT=5
-echo "HEAD sample on ${PUBLIC_BASE}…"
-node -e "
-const fs = require('fs');
-const keys = JSON.parse(fs.readFileSync('${MANIFEST}', 'utf8')).entries.map((e) => e.key);
-const pick = keys.filter((_, i) => i % Math.max(1, Math.floor(keys.length / ${SAMPLE_COUNT})) === 0).slice(0, ${SAMPLE_COUNT});
-(async () => {
-  for (const key of pick) {
-    const url = '${PUBLIC_BASE}/' + key;
-    const res = await fetch(url, { method: 'HEAD' });
-    console.log(res.status, url);
-  }
-})();
-"
-
-echo "Done. Uploaded keys recorded in ${DONE}"
-
 # the manifest is the record of what the generator found on neither store: a row with no object and
-# no alias is a key this run cannot be expected to upload, so it is counted apart
+# no alias is a key this run cannot be expected to upload, so it is counted apart. The three counts
+# go on stderr before the HEAD sample, so that a sample fetch which does not come back cannot hide
+# them.
 NULL_OBJECT="${WORK}/no-object-in-manifest"
 node -e "
 const m = JSON.parse(require('fs').readFileSync('${MANIFEST}', 'utf8'));
@@ -208,6 +205,7 @@ for (const e of m.entries) if (e.object === null && !e.aliasOf) console.log(e.ke
 
 SKIPPED=0
 NO_OBJECT=0
+FAILED=0
 if [[ -s "$SKIP_LIST" ]]; then
   while IFS= read -r skipped_key; do
     if grep -Fxq -- "$skipped_key" "$NULL_OBJECT"; then
@@ -216,6 +214,9 @@ if [[ -s "$SKIP_LIST" ]]; then
       SKIPPED=$((SKIPPED + 1))
     fi
   done < "$SKIP_LIST"
+fi
+if [[ -s "$FAIL_LIST" ]]; then
+  FAILED="$(grep -c . "$FAIL_LIST")"
 fi
 if (( NO_OBJECT > 0 )); then
   if (( NO_OBJECT == 1 )); then
@@ -230,5 +231,42 @@ if (( SKIPPED > 0 )); then
   else
     echo "$SKIPPED keys skipped: no source" >&2
   fi
+fi
+if (( FAILED > 0 )); then
+  if (( FAILED == 1 )); then
+    echo "1 key failed to upload" >&2
+  else
+    echo "$FAILED keys failed to upload" >&2
+  fi
+fi
+
+SAMPLE_COUNT=5
+echo "HEAD sample on ${PUBLIC_BASE}…"
+# the status of the sample is kept for the exit code instead of ending the run here, because it
+# counts for less than what the two lists above say
+SAMPLE_STATUS=0
+node -e "
+const fs = require('fs');
+const keys = JSON.parse(fs.readFileSync('${MANIFEST}', 'utf8')).entries.map((e) => e.key);
+const pick = keys.filter((_, i) => i % Math.max(1, Math.floor(keys.length / ${SAMPLE_COUNT})) === 0).slice(0, ${SAMPLE_COUNT});
+(async () => {
+  for (const key of pick) {
+    const url = '${PUBLIC_BASE}/' + key;
+    const res = await fetch(url, { method: 'HEAD' });
+    console.log(res.status, url);
+  }
+})();
+" || SAMPLE_STATUS=$?
+
+echo "Done. Uploaded keys recorded in ${DONE}"
+
+# the exit code of a run, in the order of what it means: 4 for a key whose upload failed, 3 for a
+# key the manifest gives a source, the sample's own status when the fetch did not come back, and 0
+# when none of the three applies, which is the status of an if that took no branch
+if (( FAILED > 0 )); then
+  exit 4
+elif (( SKIPPED > 0 )); then
   exit 3
+elif (( SAMPLE_STATUS != 0 )); then
+  exit "$SAMPLE_STATUS"
 fi
