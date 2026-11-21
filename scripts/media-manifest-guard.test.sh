@@ -672,6 +672,46 @@ else
   bad "g18: the upload script does not print [$WANT_NOT_DIR_LINE]"
 fi
 
+# g19 (round 2, item F). the modes the tree holds for this directory: a shell file of scripts/ is a program
+#      and is tracked executable, a module is imported and is not. One suite was left non-executable while
+#      its two siblings were not, and a file that is run as bash scripts/... only differs from the others
+#      by that permission -- the suites go on being run the same way.
+if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+  bad "g19: the tree cannot be asked for its modes outside a work tree"
+else
+  # -r so that the files of the directory are named and not the directory itself, and every row of the
+  # list is a blob with its mode in front
+  mode_rows="$(git ls-tree -r HEAD -- "$HERE")"
+  if [[ -z "$mode_rows" ]]; then
+    bad "g19: git ls-tree named no file of $HERE"
+  else
+    mode_problems=0
+    while IFS= read -r mode_row; do
+      mode_value="${mode_row%% *}"
+      mode_path="${mode_row##*	}"
+      case "$mode_path" in
+        *.sh)
+          if [[ "$mode_value" != "100755" ]]; then
+            echo "FAIL: $(basename "$mode_path") is tracked $mode_value, a shell file of scripts/ is 100755"
+            mode_problems=$((mode_problems + 1))
+          fi ;;
+        *.mjs)
+          if [[ "$mode_value" != "100644" ]]; then
+            echo "FAIL: $(basename "$mode_path") is tracked $mode_value, a module of scripts/ is 100644"
+            mode_problems=$((mode_problems + 1))
+          fi ;;
+      esac
+    done <<< "$mode_rows"
+    if [[ "$mode_problems" -eq 0 ]]; then
+      sh_n="$(printf '%s\n' "$mode_rows" | grep -c '\.sh$' || true)"
+      mjs_n="$(printf '%s\n' "$mode_rows" | grep -c '\.mjs$' || true)"
+      ok "g19: $sh_n shell files of scripts/ are tracked executable and $mjs_n modules are not"
+    else
+      bad "g19: $mode_problems file(s) of scripts/ are tracked with a mode their kind does not use"
+    fi
+  fi
+fi
+
 if [[ "$fail" -ne 0 ]]; then
   echo "FAILED"
   exit 1
