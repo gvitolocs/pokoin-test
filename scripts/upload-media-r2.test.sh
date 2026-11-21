@@ -40,6 +40,32 @@ fail=0
 ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
 
+# The suite reads the committed media-manifest.json and must never rewrite it: the generator is not
+# run here. The guard runs on the way out of the normal path, and on every other way out as well.
+guard_done=0
+guard_manifest() {
+  local root
+  guard_done=1
+  root="$(cd "$HERE/.." && pwd)"
+  if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "ok: skipped: the manifest guard compares against HEAD and this is no git work tree"
+    return 0
+  fi
+  if git -C "$root" diff --quiet HEAD -- media-manifest.json; then
+    echo "ok: media-manifest.json is unchanged against HEAD"
+    return 0
+  fi
+  bad "the run changed media-manifest.json"
+  return 1
+}
+on_exit() {
+  local rc=$?
+  rm -rf -- "$TMP"
+  if [[ "$guard_done" -eq 0 ]] && ! guard_manifest; then rc=1; fi
+  exit "$rc"
+}
+trap on_exit EXIT
+
 # the script under test is executable, so ./scripts/upload-media-r2.sh runs after a clone
 if [[ -x "$SRC" ]]; then
   ok "o: the script under test is executable"
@@ -585,6 +611,9 @@ fi
 if [[ -e "$TMP/forbidden.calls" ]]; then
   bad "ssh/scp stub was called: $(cat "$TMP/forbidden.calls")"
 fi
+
+# A10: the suite reads the committed manifest and must leave it exactly as HEAD has it
+guard_manifest || fail=1
 
 if [[ "$fail" -ne 0 ]]; then
   echo "FAILED"
