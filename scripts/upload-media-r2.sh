@@ -10,6 +10,10 @@
 # Optional:
 #   KEYS_FILE=path   — upload only keys listed in the file (one per line), ignoring the done-list unless FORCE=1
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
+#   POKOIN_MEDIA_FALLBACK_HOST=host -- the ssh host that holds objects the local store is missing.
+#     With it set, POKOIN_MEDIA_FALLBACK_OBJECTS=path is the directory on that host the keys are
+#     relative to: a host with no directory behind it ends the run 2, and with no host the directory
+#     is not asked for. The tree names neither of them for a run that was not told.
 # A key the file or the manifest names twice is uploaded once: the list is deduped before the keys go
 # out, so what the run handed out and what it got reports about are the same set.
 # A key that is not one name under the object directory -- it holds "..", starts with "/", or carries
@@ -45,12 +49,19 @@ DONE="${ROOT}/.media-upload.done"
 BUCKET="pokoin-test-media"
 PUBLIC_BASE="https://test-media.pokoin.com"
 OBJECTS="${POKOIN_OBJECTS:-}"
-PI_OBJECTS="/srv/pokoin/card-images/objects"
+PI_OBJECTS="${POKOIN_MEDIA_FALLBACK_OBJECTS:-}"
 PI_HOST="${POKOIN_MEDIA_FALLBACK_HOST:-}"
 # the host reaches ssh and scp as one argument, so it must not start with a dash nor hold a space or
 # another shell character; nothing is looked up before it is accepted
 if [[ -n "$PI_HOST" && ! "$PI_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]]; then
   echo "invalid POKOIN_MEDIA_FALLBACK_HOST" >&2
+  exit 2
+fi
+# the remote directory belongs to the host and to nothing else: with no host set the variable is not
+# asked for, and with one set the run that was not told names the variable instead of guessing the
+# layout of the machine it reaches
+if [[ -n "$PI_HOST" && -z "$PI_OBJECTS" ]]; then
+  echo "set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects" >&2
   exit 2
 fi
 # the store is where the operator keeps it, and the tree holds no guess at it: the run that was not
@@ -387,9 +398,10 @@ echo "Done. Uploaded keys recorded in ${DONE}"
 # take it, for a key that recorded nothing, for an xargs run that stopped before the end of the list,
 # and for the two steps that read or rewrite what the counts are made of; 3 for a key the manifest
 # gives a source; 5 for the HEAD sample that did not come back; and 0 when none of these applies,
-# which is the status of an if that took no branch. The 1 of a preflight check and the 2 of an
-# unusable fallback host, of an object directory the run was not given or that it was given as
-# something other than a directory, are long gone by here.
+# which is the status of an if that took no branch. The 1 of a preflight check ended the run before
+# any of this, and so did the 2 of an unusable fallback host, of a host with no remote directory
+# behind it, or of an object directory the run was not given or was given as something other than a
+# directory.
 if (( FAILED > 0 || NOTRECORDED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 \
       || MANIFEST_ROWS_STATUS != 0 || REWRITE_STATUS != 0 )); then
   exit 4

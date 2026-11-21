@@ -312,7 +312,8 @@ fi
 # ---------------------------------------------------------------------------
 # s1..s12: the fallback host, the keys with no source and what the manifest says about them. These
 # cases need ssh and scp to answer, so they run with a second stub directory that records every call
-# instead of the forbidden one above.
+# instead of the forbidden one above. Every run of the group is given the dummy remote directory as
+# well, which a run with no host set ignores.
 # ---------------------------------------------------------------------------
 S2="$TMP/stubs-fallback"
 mkdir -p "$S2" "$TMP/objects2" "$TMP/home-fb"
@@ -321,7 +322,10 @@ SCP_LOG="$TMP/scp.args"
 CALLS2="$TMP/wrangler2.calls"
 FB_KEYS="$TMP/keys2.txt"
 FB_HOST="fallback.example.invalid"   # a dummy, and not a name that resolves
-REMOTE_OBJECTS="/srv/pokoin/card-images/objects"   # PI_OBJECTS in the script under test
+# the remote directory the runs below hand to POKOIN_MEDIA_FALLBACK_OBJECTS: a dummy, and the layout
+# path of no machine, which is the point of the variable
+REMOTE_OBJECTS="/remote/objects"
+want_fallback_objects_line="set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects"
 FB_ALIASES_DEFAULT='{}'
 
 # the fixture manifest and aliases are read by the script with a real node, so a row that says
@@ -466,6 +470,7 @@ run_fb() {
   env -i PATH="$S2:/usr/bin:/bin" HOME="$TMP/home-fb" TMPDIR="$TMP/scratch" \
     CLOUDFLARE_API_TOKEN="$DUMMY_TOKEN" CLOUDFLARE_ACCOUNT_ID="$DUMMY_ACCOUNT" \
     WRANGLER="$S2/wrangler" POKOIN_OBJECTS="$TMP/objects2" KEYS_FILE="$FB_KEYS" \
+    POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS" \
     SSH_LOG="$SSH_LOG" SCP_LOG="$SCP_LOG" CALLS2="$CALLS2" REAL_NODE="$REAL_NODE" \
     "$@" bash "$TMP/root/scripts/upload-media-r2.sh" >"$TMP/out2" 2>"$TMP/err2"
   STATUS=$?
@@ -559,6 +564,29 @@ else
   bad "s3e: status=$STATUS ssh=$SSH_CALLS err=[$ERR]"
 fi
 
+# s3f. a host set and no remote directory to fetch out of: the run names the variable that is missing
+#      and ends 2, and it does that before ssh is asked anything at all
+fb_keys b.png
+fb_store
+fb_manifest b.png "/store/b.png" -
+run_fb s3f POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS=
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_fallback_objects_line" ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
+  ok "s3f: host set and remote directory empty: exit 2, only [$want_fallback_objects_line], no ssh, scp or wrangler call"
+else
+  bad "s3f: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s3g. no host and no remote directory: nothing is fetched from nowhere, so the variable is not asked
+#      for and the run goes on to the skip it went on to before
+run_fb s3g POKOIN_MEDIA_FALLBACK_HOST= POKOIN_MEDIA_FALLBACK_OBJECTS=
+if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"$want_fallback_objects_line"* ]] \
+  && [[ "$ERR" == *"skip (no source): b.png"* ]]; then
+  ok "s3g: with no host the remote directory is ignored, empty or not"
+else
+  bad "s3g: status=$STATUS ssh=$SSH_CALLS err=[$ERR]"
+fi
+
 # s0. the object directory has no default in the tree: with POKOIN_OBJECTS unset the run says which
 #     variable to set and ends 2 before it looks at anything else, and the fallback-host validation
 #     stays in front of it. These cases run with the recording stubs of the first section and a home
@@ -646,6 +674,26 @@ if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]]
   ok "s0g: the fallback host is validated before the object directory is looked at"
 else
   bad "s0g: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# s0h. a usable host and the remote directory not given at all: the run says which variable it is
+#      missing, before the local store is asked for and before any ssh
+run_objects s0h "" POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST"
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_fallback_objects_line" ]] \
+  && [[ ! -e "$CALLS" ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0h: host set and remote directory unset: exit 2, only that line, ahead of the local store and of any ssh"
+else
+  bad "s0h: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# s0i. the same with the remote directory given: the run goes on and asks for the local store, which
+#      is what shows the two checks are separate questions
+run_objects s0i "" POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_objects_line" ]] && [[ ! -e "$CALLS" ]] \
+  && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0i: a run with a host and a remote directory but no local store asks for POKOIN_OBJECTS alone"
+else
+  bad "s0i: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
 fi
 
 # s4. one key resolvable and one not: the resolvable one is still uploaded, the run exits 3

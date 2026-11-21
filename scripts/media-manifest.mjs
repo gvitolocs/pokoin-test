@@ -6,7 +6,9 @@
  *
  * POKOIN_OBJECTS is the directory that holds the media objects; the manifest records every key
  * relative to it and never the directory itself. Optional: POKOIN_MEDIA_FALLBACK_HOST, the ssh host
- * that holds objects missing from the local store.
+ * that holds objects missing from the local store, and with it POKOIN_MEDIA_FALLBACK_OBJECTS, the
+ * directory on that host the keys are relative to. A host with no remote directory behind it ends the
+ * run 2; with no host neither is asked for, and the tree names neither of them.
  */
 
 import { createHash } from 'node:crypto';
@@ -30,12 +32,19 @@ function loadAliases() {
 }
 
 const LOCAL_OBJECTS = process.env.POKOIN_OBJECTS || '';
-const PI_OBJECTS = '/srv/pokoin/card-images/objects';
+const PI_OBJECTS = process.env.POKOIN_MEDIA_FALLBACK_OBJECTS || '';
 const PI_HOST = process.env.POKOIN_MEDIA_FALLBACK_HOST || '';
 // the host reaches ssh as one argument, so it must not start with a dash nor hold a space or
 // another shell character; nothing is looked up before it is accepted
 if (PI_HOST && !/^[A-Za-z0-9][A-Za-z0-9._@:-]*$/.test(PI_HOST)) {
   console.error('invalid POKOIN_MEDIA_FALLBACK_HOST');
+  process.exit(2);
+}
+// the remote directory belongs to the host and to nothing else: with no host set nothing is looked
+// up anywhere, and with one set the run that was not told names the variable rather than guess the
+// layout of a machine it reaches
+if (PI_HOST && !PI_OBJECTS) {
+  console.error('set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects');
   process.exit(2);
 }
 // the store is where the operator keeps it, and the tree holds no guess at it: a run that was not

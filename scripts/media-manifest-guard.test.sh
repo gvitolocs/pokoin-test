@@ -18,6 +18,7 @@ GUARD="${HERE}/media-manifest-guard.mjs"
 GEN="${HERE}/media-manifest.mjs"
 UPLOAD="${HERE}/upload-media-r2.sh"
 WANT_DIR_LINE="set POKOIN_OBJECTS to the directory that holds the media objects"
+WANT_REMOTE_LINE="set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects"
 WANT_HOST_LINE="refusing to write a manifest that names the fallback host"
 
 fail=0
@@ -328,16 +329,18 @@ else
   bad "g4: the upload script no longer prints [$WANT_DIR_LINE]"
 fi
 
-# g5. the fallback host validation still comes before the directory check in both files
+# g5. the host is validated first, then the remote directory it reaches is asked for, then the local
+#     store: the same order in both files, so neither guesses a layout before it was told one
 for order_file in "$GEN" "$UPLOAD"; do
   host_line="$(first_line "$order_file" 'invalid POKOIN_MEDIA_FALLBACK_HOST')"
+  remote_line="$(first_line "$order_file" "$WANT_REMOTE_LINE")"
   own_dir="$(first_line "$order_file" "$WANT_DIR_LINE")"
-  if [[ "$host_line" == "0" || "$own_dir" == "0" ]]; then
-    bad "g5: $(basename "$order_file") is missing one of the two checks (host=$host_line dir=$own_dir)"
-  elif (( host_line < own_dir )); then
-    ok "g5: $(basename "$order_file") validates the host (line $host_line) before it asks for the directory (line $own_dir)"
+  if [[ "$host_line" == "0" || "$remote_line" == "0" || "$own_dir" == "0" ]]; then
+    bad "g5: $(basename "$order_file") is missing one of the three checks (host=$host_line remote=$remote_line dir=$own_dir)"
+  elif (( host_line < remote_line && remote_line < own_dir )); then
+    ok "g5: $(basename "$order_file") validates the host ($host_line), asks for its remote directory ($remote_line), then for the local store ($own_dir)"
   else
-    bad "g5: in $(basename "$order_file") the host line is at $host_line and the directory check at $own_dir"
+    bad "g5: in $(basename "$order_file") host=$host_line remote=$remote_line dir=$own_dir, expected that order"
   fi
 done
 
@@ -429,6 +432,62 @@ if grep -q -E 'assertNoLeaks\((manifest|text)\)' "$GEN"; then
   ok "g10: the leak check is handed the manifest of this run"
 else
   bad "g10: the leak check is not handed the manifest object or its text: [$(grep -E 'assertNoLeaks\(' "$GEN" | head -1)]"
+fi
+
+# g11. the remote directory of the fallback host is read from the environment in both scripts, with no
+#      layout path left in the tree to fall back to
+remote_assign="$(grep -E '^const PI_OBJECTS' "$GEN" | head -1 || true)"
+if [[ -z "$remote_assign" ]]; then
+  bad "g11: no PI_OBJECTS declaration was found in the generator"
+elif [[ "$remote_assign" != *'process.env.POKOIN_MEDIA_FALLBACK_OBJECTS'* ]]; then
+  bad "g11: the remote directory of the generator is not read from the environment: $remote_assign"
+elif [[ "$remote_assign" == */* ]]; then
+  bad "g11: the line that reads the remote directory still holds a path: $remote_assign"
+else
+  ok "g11: the generator takes its remote directory from the environment, with no default in the tree"
+fi
+upload_remote="$(grep -E '^PI_OBJECTS=' "$UPLOAD" | head -1 || true)"
+if [[ -z "$upload_remote" ]]; then
+  bad "g11: no PI_OBJECTS assignment was found in the upload script"
+elif [[ "$upload_remote" != *'POKOIN_MEDIA_FALLBACK_OBJECTS'* ]]; then
+  bad "g11: the remote directory of the upload script is not read from the environment: $upload_remote"
+elif [[ "$upload_remote" == */* ]]; then
+  bad "g11: the line that reads the remote directory still holds a path: $upload_remote"
+else
+  ok "g11: the upload script takes its remote directory from the environment, with no default in the tree"
+fi
+
+# g12. no script of the pair names a directory layout of the machine it happens to run on
+for layout_file in "$GEN" "$UPLOAD" "$HERE/media-manifest-guard.mjs"; do
+  if grep -q -F 'srv' "$layout_file"; then
+    bad "g12: $(basename "$layout_file") still names a layout directory of one machine"
+  else
+    ok "g12: $(basename "$layout_file") holds no default remote directory"
+  fi
+done
+
+# g13. a host with no remote directory behind it ends the generator before the ssh it would run, on
+#      stderr, with the line the upload script prints too
+remote_msg="$(first_line "$GEN" "$WANT_REMOTE_LINE")"
+ssh_spawn="$(first_line "$GEN" "spawn('ssh'")"
+host_msg="$(first_line "$GEN" 'invalid POKOIN_MEDIA_FALLBACK_HOST')"
+if [[ "$remote_msg" == "0" ]]; then
+  bad "g13: the generator does not print [$WANT_REMOTE_LINE]"
+elif [[ "$ssh_spawn" != "0" ]] && (( remote_msg >= ssh_spawn )); then
+  bad "g13: the remote directory is asked for on line $remote_msg, not ahead of the ssh call on line $ssh_spawn"
+elif (( host_msg >= remote_msg )); then
+  bad "g13: the remote directory ($remote_msg) is asked for before the host is validated ($host_msg)"
+elif [[ "$(sed -n "$((remote_msg + 1))p" "$GEN")" != *'process.exit(2)'* ]]; then
+  bad "g13: the line after the message is not an exit 2: [$(sed -n "$((remote_msg + 1))p" "$GEN")]"
+elif [[ "$(sed -n "${remote_msg}p" "$GEN")" != *'console.error'* ]]; then
+  bad "g13: the message does not go to stderr: [$(sed -n "${remote_msg}p" "$GEN")]"
+else
+  ok "g13: a host with no remote directory is refused on stderr with an exit 2, ahead of any ssh"
+fi
+if holds "$UPLOAD" "$WANT_REMOTE_LINE"; then
+  ok "g13: the generator and the upload script print the same line for the same missing value"
+else
+  bad "g13: the upload script does not print [$WANT_REMOTE_LINE]"
 fi
 
 if [[ "$fail" -ne 0 ]]; then
