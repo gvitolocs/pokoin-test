@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/upload-media-r2.sh: credential loading and preflight, the fallback host, the
-# keys skipped for want of a source, the upload whose wrangler call fails; and
+# keys skipped for want of a source, the upload whose wrangler call fails, and the keys a run failed
+# to account for; and
 # scripts/no-host-names.test.sh as one of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
@@ -333,17 +334,54 @@ STUB
 # The put of a key named in the FAIL_KEYS file fails, so a run can be shown what a failed wrangler
 # call does; the file is absent or empty when every upload is meant to succeed. The fourth argument
 # of a put is the target, bucket/key.
+#
+# Two more ways of breaking the xargs child, so a run can be shown what a child that never reports
+# its key does:
+#   UNRECORDABLE_KEY=<key>  the put of that key first removes the private directory the script put
+#                           its per-key record files in (only when that directory is under TMPDIR),
+#                           then fails: a child that wants to record the key finds nowhere to write.
+#   KILLED_KEY=<key>        the put of that key kills the shell that ran it -- the parent of this
+#                           stub, and only when that parent is bash -- so the child dies by signal.
 cat > "$S2/wrangler" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >> "$CALLS2"
+put_key=''
+if [ "$1" = r2 ] && [ "$2" = object ] && [ "$3" = put ]; then
+  put_key="${4#pokoin-test-media/}"
+fi
+if [ -n "$put_key" ] && [ -n "${UNRECORDABLE_KEY:-}" ] && [ "$put_key" = "$UNRECORDABLE_KEY" ]; then
+  for p in "${RESULTS:-}" "${FAIL_LIST:-}" "${SKIP_LIST:-}"; do
+    [ -n "$p" ] || continue
+    d=${p%/*}
+    case $d in
+      "$TMPDIR"/*) rm -rf -- "$d" ;;
+    esac
+  done
+  echo "stub wrangler: the record directory of the run is gone" >&2
+  exit 1
+fi
+if [ -n "$put_key" ] && [ -n "${KILLED_KEY:-}" ] && [ "$put_key" = "$KILLED_KEY" ]; then
+  if [ "$(cat "/proc/$PPID/comm" 2>/dev/null)" = bash ]; then
+    kill -9 "$PPID"
+  fi
+  exit 0
+fi
 if [ -n "${FAIL_KEYS:-}" ] && [ -f "${FAIL_KEYS:-}" ] \
-  && [ "$1" = r2 ] && [ "$2" = object ] && [ "$3" = put ] \
-  && grep -Fxq -- "${4#pokoin-test-media/}" "$FAIL_KEYS"; then
+  && [ -n "$put_key" ] && grep -Fxq -- "$put_key" "$FAIL_KEYS"; then
   echo "stub wrangler: the put of $4 failed" >&2
   exit 1
 fi
 exit 0
 STUB
+# BASH_ENV is read by every shell bash starts with -c, which is what the xargs children are, so this
+# file makes the child of one key exit 255 before it runs any of the upload code. xargs stops at the
+# first child that exits 255, so the keys after it are never worked at all.
+cat > "$S2/die255.bashenv" <<'BASHENV'
+if [ -n "${DIE255_KEY:-}" ] && [ "${1:-}" = "$DIE255_KEY" ]; then
+  exit 255
+fi
+:
+BASHENV
 chmod +x "$S2"/*
 
 # REAL_NODE is the node the stubs hand everything but the fetch to; the manifest fixtures need it
@@ -798,6 +836,102 @@ if [[ "$STATUS" -eq 4 ]] && [[ "$err_last" == "1 key failed to upload" ]] \
   ok "s17 (e): a failed upload with a failing sample fetch: exit 4, the failure line last"
 else
   bad "s17c: status=$STATUS err_last=[$err_last] calls=[$(sort "$CALLS2" 2>/dev/null | tr '\n' '|')] err=[$ERR]"
+fi
+fail_keys
+
+# ---------------------------------------------------------------------------
+# s18..s21: every key handed to xargs is accounted for. The per-key work runs in an xargs child
+# that has no errexit, so the only thing that says a key was worked at all is the record the child
+# writes. Three ways a child can leave that record unwritten: nowhere to write it (s18), a child
+# that exits 255, which stops xargs before the later keys (s19), and a child killed by a signal,
+# which does the same (s20). Today all three end the run without the counts: s18 silently, because
+# the write of the failure record is not checked and the child still returns 0, and s19 and s20
+# loudly, because a nonzero xargs status hits errexit and the script dies at that line.
+# ---------------------------------------------------------------------------
+
+# unaccounted_line <n>: the line the run must print when n of the keys it handed to xargs reported
+# nothing at all.
+unaccounted_line() {
+  if [[ "$1" == "1" ]]; then printf 'unaccounted: 1 key\n'; else printf 'unaccounted: %s keys\n' "$1"; fi
+}
+
+# s18 (a). a failing put whose record cannot be written, because the directory holding the record
+#          files of the run was removed during that put: the key is not accounted for, so the run
+#          says so, prints its counts, still says Done and ends 4 -- never 0.
+fb_keys good.png bad.png
+fb_store good.png bad.png
+fb_manifest good.png "/store/good.png" - bad.png "/store/bad.png" -
+fail_keys
+run_fb s18 PARALLEL=1 UNRECORDABLE_KEY=bad.png
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$ERR" == *"upload failed: bad.png"* ]] \
+  && [[ "$ERR" == *"$(unaccounted_line 2)"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] \
+  && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s18 (a): a failure record that cannot be written: the key is counted unaccounted, the counts and Done print, exit 4"
+else
+  bad "s18: status=$STATUS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+
+# s19 (b). the child of one key exits 255, which makes xargs stop there: the keys after it were
+#          never worked, so they are the unaccounted ones, and the run still prints its counts and
+#          ends 4 instead of dying at the xargs line.
+fb_keys good.png die255.png later.png
+fb_store good.png die255.png later.png
+fb_manifest good.png "/store/good.png" - die255.png "/store/die255.png" - later.png "/store/later.png" -
+run_fb s19 PARALLEL=1 BASH_ENV="$S2/die255.bashenv" DIE255_KEY=die255.png
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$ERR" == *"$(unaccounted_line 2)"* ]] \
+  && [[ "$ERR" != *"failed to upload"* ]] && [[ "$ERR" != *"skipped: no source"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s19 (b): a child that exits 255: [$(unaccounted_line 2)] on stderr, the counts and Done print, exit 4"
+else
+  bad "s19: status=$STATUS wrangler=$WR_CALLS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+
+# s20 (c). the child of one key is killed by a signal during its put, which also stops xargs: that
+#          key and the one after it are unaccounted, and the killed key is neither recorded as done
+#          nor counted as failed, since it never got to say anything.
+fb_keys good.png killed.png later.png
+fb_store good.png killed.png later.png
+fb_manifest good.png "/store/good.png" - killed.png "/store/killed.png" - later.png "/store/later.png" -
+run_fb s20 PARALLEL=1 KILLED_KEY=killed.png
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] \
+  && [[ "$ERR" == *"$(unaccounted_line 2)"* ]] \
+  && [[ "$ERR" != *"upload failed: killed.png"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] \
+  && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s20 (c): a child killed by a signal: [$(unaccounted_line 2)] on stderr, the counts and Done print, exit 4"
+else
+  bad "s20: status=$STATUS done=[$DONE_ROWS] out=[$OUT] err=[$ERR]"
+fi
+
+# s21 (d). an ordinary mixed run keeps the output PK-C043 gives: one key uploaded, one real skip,
+#          one row the manifest gives no object, one failed put. All of its keys report themselves,
+#          so nothing is unaccounted and the script's own stderr is exactly the per-key lines then
+#          the three counts, in that order. The stub's own line about the failed put is left out of
+#          the comparison.
+fb_keys good.png absent.png nothing.png bad.png
+fb_store good.png bad.png
+fb_manifest good.png "/store/good.png" - absent.png "/store/absent.png" - \
+  nothing.png - - bad.png "/store/bad.png" -
+fail_keys bad.png
+run_fb s21 PARALLEL=1 FAIL_KEYS="$FAIL_KEYS"
+want_err="$(printf '%s\n' 'skip (no source): absent.png' 'skip (no source): nothing.png' \
+  'upload failed: bad.png' \
+  '1 key has no object in the manifest' '1 key skipped: no source' '1 key failed to upload')"
+err_script="$(printf '%s\n' "$ERR" | grep -v '^stub wrangler:' || true)"
+DONE_ROWS="$(done_list | tr '\n' '|')"
+if [[ "$STATUS" -eq 4 ]] && [[ "$err_script" == "$want_err" ]] \
+  && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]] && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s21 (d): the counts of an ordinary run are exactly the PK-C043 ones, with no unaccounted line and exit 4"
+else
+  bad "s21: status=$STATUS err=[$err_script] want=[$want_err] done=[$DONE_ROWS] out=[$OUT]"
 fi
 fail_keys
 
