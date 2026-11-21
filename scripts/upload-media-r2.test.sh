@@ -1622,6 +1622,49 @@ else
   bad "s36: status=$STATUS keys=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS ssh=$SSH_CALLS done=[$(done_list | tr '\n' '|')] err=[$ERR]"
 fi
 
+# s37 (item B). a key that names nothing is no key: the workers take no blank argument, so a run that
+#               counted one would hand out a name it could never get a record for. The keys file already
+#               ignores a blank line, and a line of blanks alone is what the strip of the leading blanks
+#               turns into nothing -- the count and the work must say the same thing about it.
+fb_keys '   ' '' good.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" -
+run_fb s37 PARALLEL=1
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 1"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$ERR" != *"invalid key"* ]] && [[ "$(done_list)" == "good.png" ]]; then
+  ok "s37 (item B): a blank-only line and an empty line of the keys file are no keys: 1 to process, one upload, exit 0"
+else
+  bad "s37: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS done=[$(done_list)] err=[$ERR]"
+fi
+
+# s37b (item B). the same empty key coming from the manifest, where no line filter runs first: the row
+#                is there, the strip leaves it with no name, and the list the run counts is the list it
+#                hands out. It goes with the duplicates, before anything counts a key.
+fb_manifest '  ' "/store/none.png" - good.png "/store/good.png" -
+fb_store good.png
+run_fb s37b PARALLEL=1 KEYS_FILE=
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 1"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$ERR" != *"invalid key"* ]] && [[ "$(done_list)" == "good.png" ]]; then
+  ok "s37b (item B): a manifest row with an empty key is dropped before the list is counted: 1 to process, exit 0"
+else
+  bad "s37b: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS ssh=$SSH_CALLS done=[$(done_list)] err=[$ERR]"
+fi
+
+# s37c (item B). the empty key alone in the file is nothing to do, not a failure and not a key: the run
+#                that uploads nothing and says nothing ends 0, as the empty keys file does (s31).
+fb_keys '   '
+fb_store
+fb_manifest good.png "/store/good.png" -
+run_fb s37c PARALLEL=1
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 0"* ]] \
+  && [[ "$WR_CALLS" -eq 0 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" == "" ]]; then
+  ok "s37c (item B): a keys file that holds one blank line only is a run with nothing to do: 0 keys, exit 0, nothing on stderr"
+else
+  bad "s37c: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS err=[$ERR]"
+fi
+
 # s12. the repository-wide check runs as a step of this suite, so its failure fails the suite
 hfail=0
 hout="$(bash "$HERE/no-host-names.test.sh" 2>&1)" || hfail=1
