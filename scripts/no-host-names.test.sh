@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Checks that no tracked, non-binary file of this repository names either of the two retired
-# machines, in any letter case, and that none of them names a home directory: a path that starts
-# /home/<name>/ or /Users/<name>/ is one person's machine layout. Both names and both directory
-# roots are assembled from fragments below, so this file holds no string its own scan matches, and it
-# reports the offending file names and never the matched text.
+# machines, in any letter case, and that none of them names a home directory: a path that starts at
+# the root of one person's account and goes on below it is one person's machine layout, and it has
+# no business in a public file. Both names and both directory roots are assembled from fragments
+# below, so this file holds no string its own scan matches, and it reports the offending file names
+# and never the matched text.
 #
 # A URL path is not a home directory: the token after the root has to be followed by another slash,
 # which is what keeps /home/logo.png of the site out of the way.
