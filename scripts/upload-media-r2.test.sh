@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Tests for scripts/upload-media-r2.sh: credential loading and preflight, the object directory it
-# has to be told about, the fallback host, the keys skipped for want of a source, the upload whose
-# wrangler call fails, the keys a run failed to account for, the key that is listed twice and the one
-# it cannot record in the done list; and scripts/no-host-names.test.sh and
-# scripts/media-manifest-guard.test.sh as two of its own steps.
+# has to be told about, the fallback host, the key that names a path instead of a file of the store,
+# the keys skipped for want of a source, the upload whose wrangler call fails, the keys a run failed
+# to account for, the key that is listed twice and the one it cannot record in the done list; and
+# scripts/no-host-names.test.sh and scripts/media-manifest-guard.test.sh as two of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
 set -euo pipefail
@@ -1297,6 +1297,117 @@ if [[ "$STATUS" -eq 0 ]] && [[ -z "$ERR" ]] && [[ "$WR_CALLS" -eq 0 ]] \
   ok "s31b: keys that are all recorded already end 0 with no stderr and no put"
 else
   bad "s31b: status=$STATUS wrangler=$WR_CALLS err=[$ERR] done=[$(cat "$TMP/root/.media-upload.done")]"
+fi
+
+# ---------------------------------------------------------------------------
+# s33..s35: a key that names a path instead of a file under the object directory. The key comes from
+# the manifest or from the keys file, and the first thing a run does with it is build
+# "$OBJECTS/$key" out of it, so the shape is refused there: it is a bad record, not a missing object,
+# and it costs the run the same 4 a failed upload costs.
+# ---------------------------------------------------------------------------
+
+# s33. three keys of that shape beside a good one, with a fallback host configured: each says so
+#      once, none of them reaches the store, the host or wrangler, and the good key still goes up.
+fb_keys '../x.png' 'a/../b.png' '/etc/x' good.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" -
+run_fb s33 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+DONE_ROWS="$(done_list | tr '\n' '|')"
+for want_bad in '../x.png' 'a/../b.png' '/etc/x'; do
+  if grep -Fq -- "invalid key (skipped): $want_bad" "$TMP/err2"; then
+    ok "s33: the key [$want_bad] is refused with its own line"
+  else
+    bad "s33: no refusal line for [$want_bad]: err=[$ERR]"
+  fi
+done
+if [[ "$STATUS" -eq 4 ]] && [[ "$OUT" == *"Keys to process: 4"* ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/good\.png' "$CALLS2" \
+  && [[ "$err_last" == "$(line_for 3 'key failed to upload' 'keys failed to upload')" ]] \
+  && [[ "$ERR" != *"skipped: no source"* ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s33 (a): a key that is a path: no ssh, scp or store lookup for it, the good key uploaded, [$(line_for 3 'key failed to upload' 'keys failed to upload')] last, exit 4"
+else
+  bad "s33: status=$STATUS keys=[$(printf '%s\n' "$OUT" | head -1)] ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS err_last=[$err_last] done=[$DONE_ROWS] err=[$ERR]"
+fi
+
+# s34. a keys file with a carriage return inside a key, which is what a file written on another
+#      system holds: the control character is shown and never written out, the key is refused, and
+#      the key beside it is accounted for.
+fb_keys good.png $'cr\rfile.png'
+fb_store good.png
+fb_manifest good.png "/store/good.png" -
+run_fb s34 PARALLEL=1
+if [[ "$STATUS" -eq 4 ]] && grep -Fq -- 'invalid key (skipped): cr?file.png' "$TMP/err2" \
+  && [[ "$OUT" == *"Keys to process: 2"* ]] && [[ "$SSH_CALLS" -eq 0 ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$(done_list)" == "good.png" ]] && printf '%s\n' "$ERR" | grep -vq $'\r'; then
+  ok "s34 (b): a key with a carriage return: refused as [cr?file.png], the good key uploaded alone, exit 4"
+else
+  bad "s34: status=$STATUS keys=[$(printf '%s\n' "$OUT" | head -1)] ssh=$SSH_CALLS wrangler=$WR_CALLS done=[$(done_list)] err=[$ERR]"
+fi
+
+# s35. the validator itself, extracted from the script and called with the keys a line-based list
+#      cannot hand it: a key with an embedded newline. The shapes the run must accept are called in
+#      the same harness, so the refusal is not a catch-all.
+awk '/^key_is_bad\(\) \{/,/^\}$/' "$SRC" > "$TMP/key_is_bad.sh"
+if [[ ! -s "$TMP/key_is_bad.sh" ]]; then
+  bad "s35: no key_is_bad function was found in $SRC to extract"
+else
+  cat > "$TMP/key-cases.bash" <<'HARNESS'
+#!/usr/bin/env bash
+set +e
+# shellcheck disable=SC1090
+source "$1"
+problems=0
+# key_case <name> <want status> <want line or -> <key>
+key_case() {
+  local name="$1" want_status="$2" want_line="$3" key="$4" got_line got_status
+  got_line="$(key_is_bad "$key" 2>&1 >/dev/null)"
+  got_status=$?
+  if [[ "$got_status" -ne "$want_status" ]]; then
+    echo "FAIL: $name: status $got_status, expected $want_status"
+    problems=$((problems + 1))
+    return
+  fi
+  if [[ "$want_line" == "-" ]]; then
+    if [[ -n "$got_line" ]]; then
+      echo "FAIL: $name: it printed [$got_line] on a key it must accept"
+      problems=$((problems + 1))
+    fi
+    return
+  fi
+  if [[ "$got_line" != "$want_line" ]]; then
+    echo "FAIL: $name: line [$got_line], expected [$want_line]"
+    problems=$((problems + 1))
+    return
+  fi
+  echo "ok: $name"
+}
+key_case 'a key above the store' 1 '-' 'a.png'
+key_case 'a key in a folder of the store' 1 '-' 'figure-masks-whole/v1.webp'
+key_case 'a key whose name starts with a dash' 1 '-' '-c.png'
+key_case 'a key with single dots in it' 1 '-' 'a.b.c.png'
+key_case 'a key that reaches above the store' 0 'invalid key (skipped): ../x.png' '../x.png'
+key_case 'a key with a parent step inside it' 0 'invalid key (skipped): a/../b.png' 'a/../b.png'
+key_case 'a key that is an absolute path' 0 'invalid key (skipped): /etc/x' '/etc/x'
+key_case 'a key with an embedded newline' 0 'invalid key (skipped): a?b.png' $'a\nb.png'
+key_case 'a key with an embedded carriage return' 0 'invalid key (skipped): a?b.png' $'a\rb.png'
+key_case 'a key with an embedded tab' 0 'invalid key (skipped): a?b.png' $'a\tb.png'
+[[ "$problems" -eq 0 ]] && echo 'all passed'
+exit "$problems"
+HARNESS
+  kfail=0
+  kout="$(bash "$TMP/key-cases.bash" "$TMP/key_is_bad.sh" 2>&1)" || kfail=1
+  if [[ "$kfail" -eq 0 ]] && [[ "$kout" == *"all passed"* ]]; then
+    while IFS= read -r line; do
+      [[ "$line" == 'ok: '* ]] && ok "key validator: ${line#ok: }"
+    done <<< "$kout"
+  else
+    printf '%s\n' "$kout"
+    bad "s35: the extracted key validator did not hold the contract (rc=$kfail)"
+  fi
 fi
 
 # s12. the repository-wide check runs as a step of this suite, so its failure fails the suite

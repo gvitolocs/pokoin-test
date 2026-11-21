@@ -11,6 +11,8 @@
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
 # A key the file or the manifest names twice is uploaded once: the list is deduped before the keys go
 # out, so what the run handed out and what it got reports about are the same set.
+# A key that is not one name under the object directory -- it holds "..", starts with "/", or carries
+# a control character -- is refused where it stands, never looked up, and counted as a failed key.
 set -euo pipefail
 
 # --- credentials loader: begin
@@ -136,6 +138,19 @@ content_type_for() {
   esac
 }
 
+# a key is one name under the object directory. One that reaches above it, that starts at the root of
+# the store, or that runs over two lines is a bad record and not a missing object: it is refused here,
+# before the path is built out of it and before the store, the done list or the fallback host is
+# looked at, and its control characters are shown rather than written.
+key_is_bad() {
+  local key="$1"
+  if [[ "$key" == *..* || "$key" == /* || "$key" == *[[:cntrl:]]* ]]; then
+    printf 'invalid key (skipped): %s\n' "${key//[[:cntrl:]]/?}" >&2
+    return 0
+  fi
+  return 1
+}
+
 resolve_file() {
   local key="$1"
   local path="${OBJECTS}/${key}"
@@ -166,6 +181,10 @@ record_result() {
 
 upload_one() {
   local key="$1"
+  if key_is_bad "$key"; then
+    record_result fail "$key"
+    return
+  fi
   if [[ "$FORCE" != "1" ]] && grep -Fxq -- "$key" "$DONE" 2>/dev/null; then
     record_result ok "$key"
     return
@@ -226,7 +245,7 @@ upload_one() {
 }
 
 export ALIASES BUCKET DONE OBJECTS PI_HOST PI_OBJECTS WRANGLER FORCE
-export -f resolve_file upload_one alias_for content_type_for record_result
+export -f resolve_file upload_one alias_for content_type_for record_result key_is_bad
 
 echo "Uploading with $WRANGLER (parallel ${PARALLEL})…"
 # the status of xargs is captured rather than left to errexit, because a child that exits 255 or dies
@@ -357,12 +376,12 @@ const pick = keys.filter((_, i) => i % Math.max(1, Math.floor(keys.length / ${SA
 echo "Done. Uploaded keys recorded in ${DONE}"
 
 # the exit code of a run, in the order of what it means: 4 for a key whose upload failed, for a key
-# that uploaded into a done list that would not take it, for a key that recorded nothing, for an
-# xargs run that stopped before the end of the list, and for the two steps that read or rewrite what
-# the counts are made of; 3 for a key the manifest gives a source; 5 for the HEAD sample that did not
-# come back; and 0 when none of these applies, which is the status of an if that took no branch. The
-# 1 of a preflight check and the 2 of an unusable fallback host or of an object directory the run was
-# not given are long gone by here.
+# the list gave as a path rather than a name, for a key that uploaded into a done list that would not
+# take it, for a key that recorded nothing, for an xargs run that stopped before the end of the list,
+# and for the two steps that read or rewrite what the counts are made of; 3 for a key the manifest
+# gives a source; 5 for the HEAD sample that did not come back; and 0 when none of these applies,
+# which is the status of an if that took no branch. The 1 of a preflight check and the 2 of an
+# unusable fallback host or of an object directory the run was not given are long gone by here.
 if (( FAILED > 0 || NOTRECORDED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 \
       || MANIFEST_ROWS_STATUS != 0 || REWRITE_STATUS != 0 )); then
   exit 4
