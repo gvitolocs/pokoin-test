@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # Upload media-manifest.json objects to R2 from nezopt (local object store + pi-home fallback).
-# Requires: ~/.bun/bin/wrangler with CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (use `bash -ic` if needed).
+# Loads ~/.config/pokoin/cloudflare.env itself (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID come from it); needs ~/.bun/bin/wrangler.
 # Do not run in CI without intent — this pushes to pokoin-test-media.
 #
 # Optional:
 #   KEYS_FILE=path   — upload only keys listed in the file (one per line), ignoring the done-list unless FORCE=1
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
 set -euo pipefail
+
+# Load the Cloudflare credentials file when the shell did not (skipped when LANE_WORKER is set).
+_cf_env="${HOME:-}/.config/pokoin/cloudflare.env"
+if [[ -z "${LANE_WORKER:-}" && -f "$_cf_env" && -r "$_cf_env" ]]; then
+  case $- in *a*) _cf_had_a=1 ;; *) _cf_had_a=0 ;; esac
+  set -a
+  # shellcheck disable=SC1090
+  . "$_cf_env" >/dev/null 2>&1 || true
+  [[ "$_cf_had_a" == 1 ]] || set +a
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="${ROOT}/media-manifest.json"
@@ -28,6 +38,11 @@ fi
 
 if [[ ! -x "$WRANGLER" ]]; then
   echo "Wrangler not found at $WRANGLER" >&2
+  exit 1
+fi
+
+if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+  echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set (looked in ${_cf_env})" >&2
   exit 1
 fi
 
