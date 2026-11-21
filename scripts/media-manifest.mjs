@@ -5,8 +5,14 @@
  *   POKOIN_OBJECTS=/path/to/object/store node scripts/media-manifest.mjs
  *
  * POKOIN_OBJECTS is the directory that holds the media objects; the manifest records every key
- * relative to it and never the directory itself. Optional: POKOIN_MEDIA_FALLBACK_HOST, the ssh host
- * that holds objects missing from the local store.
+ * relative to it and never the directory itself. A value that is not a directory which is there ends the
+ * run 2 with the line the upload script prints, before a catalog is fetched. Optional:
+ * POKOIN_MEDIA_FALLBACK_HOST, the ssh host that holds objects missing from the local store, and with it
+ * POKOIN_MEDIA_FALLBACK_OBJECTS, the directory on that host the keys are relative to. A host with no
+ * remote directory behind it ends the run 2; with no host neither is asked for, and the tree names
+ * neither of them. A remote directory that is not an absolute path of plain characters, with no step out
+ * of itself, ends the run 2 too, before a catalog is fetched: the keys go over under it as one quoted
+ * word, and a name of that shape is a mistyped path rather than a place.
  */
 
 import { createHash } from 'node:crypto';
@@ -17,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 import { collectMediaKeys } from './media-collect.mjs';
-import { assertNoHost } from './media-manifest-guard.mjs';
+import { assertDirectory, assertNoHost, assertNoLeaks } from './media-manifest-guard.mjs';
 import { MEDIA_BASE } from '../src/lib/media.js';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
@@ -30,18 +36,51 @@ function loadAliases() {
 }
 
 const LOCAL_OBJECTS = process.env.POKOIN_OBJECTS || '';
-const PI_OBJECTS = '/srv/pokoin/card-images/objects';
+const PI_OBJECTS = process.env.POKOIN_MEDIA_FALLBACK_OBJECTS || '';
 const PI_HOST = process.env.POKOIN_MEDIA_FALLBACK_HOST || '';
-// the host reaches ssh as one argument, so it must not start with a dash nor hold a space or
-// another shell character; nothing is looked up before it is accepted
-if (PI_HOST && !/^[A-Za-z0-9][A-Za-z0-9._@:-]*$/.test(PI_HOST)) {
+// the host reaches ssh as one argument, so it must not start with a dash nor hold a space, a colon or
+// another shell character; a host with a port on it is not one ssh can use, and nothing is looked up
+// before the value is accepted
+if (PI_HOST && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(PI_HOST)) {
   console.error('invalid POKOIN_MEDIA_FALLBACK_HOST');
+  process.exit(2);
+}
+// the remote directory belongs to the host and to nothing else: with no host set nothing is looked
+// up anywhere, and with one set the run that was not told names the variable rather than guess the
+// layout of a machine it reaches
+if (PI_HOST && !PI_OBJECTS) {
+  console.error('set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects');
+  process.exit(2);
+}
+// the shape of that directory is held to what a name is made of, the way the host is: absolute, of
+// these characters only, no step out of itself and nothing after its name. It stands in front of every
+// key the run asks the other machine for, and it goes into a command line the shell there reads, so a
+// value of any other shape ends the run before a catalog is fetched. A run with no host set ends the
+// same way: the name it would reach for is the one it was given either way, and a directory holding a
+// space, a quote or a star is a mistyped path rather than a place.
+if (PI_OBJECTS && !(
+  /^[A-Za-z0-9._/@+-]+$/.test(PI_OBJECTS)
+  && PI_OBJECTS.startsWith('/')
+  && !PI_OBJECTS.includes('\n')
+  && !/(^|\/)\.\.(\/|$)/.test(PI_OBJECTS)
+)) {
+  console.error('invalid POKOIN_MEDIA_FALLBACK_OBJECTS');
   process.exit(2);
 }
 // the store is where the operator keeps it, and the tree holds no guess at it: a run that was not
 // told would hash the files of whatever directory its name happens to match
 if (!LOCAL_OBJECTS) {
   console.error('set POKOIN_OBJECTS to the directory that holds the media objects');
+  process.exit(2);
+}
+// a name that is not there, or that holds a file, cannot give up any object: it would be read as a store
+// with nothing in it, and every key of the list would come back missing from the media. The upload script
+// has held this rule for its own run; the check stands in the guard module, where a test can ask it what
+// it does without running this file, which is never run by one.
+try {
+  assertDirectory(LOCAL_OBJECTS);
+} catch {
+  console.error('POKOIN_OBJECTS is not a directory');
   process.exit(2);
 }
 const LEGACY_CATALOG = 'https://cdn.pokoin.com/poko-video/newpoko/catalog.json';
@@ -72,7 +111,9 @@ async function sha256File(path) {
 
 function piKeysPresent(keys) {
   if (!PI_HOST || !keys.length) return Promise.resolve(new Set());
-  const script = `cd ${PI_OBJECTS} && while IFS= read -r k; do test -f "$k" && printf '%s\\n' "$k"; done`;
+  // the directory is quoted on the way in, though the value was held to plain characters above: the
+  // command is one line the shell on that machine reads, and a name is one word there or it is nothing
+  const script = `cd '${PI_OBJECTS}' && while IFS= read -r k; do test -f "$k" && printf '%s\\n' "$k"; done`;
   return new Promise((resolve) => {
     const child = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--', PI_HOST, script], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -192,11 +233,17 @@ async function main() {
   };
 
   const text = `${JSON.stringify(manifest, null, 2)}\n`;
-  // the check runs on the string that is about to become the file, before anything is written
+  // the checks run on the manifest that is about to become the file, before anything is written
   try {
     assertNoHost(text, PI_HOST);
   } catch {
     console.error('refusing to write a manifest that names the fallback host');
+    process.exit(1);
+  }
+  try {
+    assertNoLeaks(manifest);
+  } catch (e) {
+    console.error(`refusing to write a manifest that names a directory: ${e.message}`);
     process.exit(1);
   }
   writeFileSync(OUT, text);

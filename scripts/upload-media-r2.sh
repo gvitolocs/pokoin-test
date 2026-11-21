@@ -5,12 +5,30 @@
 #
 # Required:
 #   POKOIN_OBJECTS=path -- the directory that holds the media objects; the manifest gives every key
-#     relative to it. Unset or empty, the script says so and ends 2 before it looks at anything else.
+#     relative to it. Unset or empty, the script says so and ends 2 before it looks at anything else;
+#     set but not a directory, it says that instead, in the same place.
 # Optional:
 #   KEYS_FILE=path   — upload only keys listed in the file (one per line), ignoring the done-list unless FORCE=1
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
+#   POKOIN_MEDIA_FALLBACK_HOST=host -- the ssh host that holds objects the local store is missing.
+#     With it set, POKOIN_MEDIA_FALLBACK_OBJECTS=path is the directory on that host the keys are
+#     relative to: a host with no directory behind it ends the run 2, and with no host the directory
+#     is not asked for. The tree names neither of them for a run that was not told.
+#     That directory is held to what a name is made of -- absolute, of letters, digits and . _ / @ + -,
+#     with no ".." step in it and nothing after its name -- and a value of any other shape ends the run 2
+#     saying so, after the host check and before the store is looked at or the host is reached. A run with
+#     no host set is refused the same way: a directory of that shape is a mistyped path, not a place.
+# The path the host is asked about goes over as one quoted word, so a key that holds a blank, a star or a
+# dollar sign cannot become two names, a list of files or a command in the shell that reads it there.
 # A key the file or the manifest names twice is uploaded once: the list is deduped before the keys go
-# out, so what the run handed out and what it got reports about are the same set.
+# out, so what the run handed out and what it got reports about are the same set. The blanks in front
+# of a key come off before that, so a key and the same key with spaces in front of it are one key, and
+# a row left with nothing in it is dropped here too: it names nothing, and no worker takes a blank.
+# A key that is not one name under the object directory -- one of its components is "..", it starts
+# with "/", or it carries a control character -- is refused where it stands, never looked up, and
+# counted as a failed key. Two dots inside a name are part of that name and a key like any other. The
+# target an alias names is a key of the same kind and is refused before its path is built, with the
+# requested key standing as the failed one.
 set -euo pipefail
 
 # --- credentials loader: begin
@@ -42,18 +60,48 @@ DONE="${ROOT}/.media-upload.done"
 BUCKET="pokoin-test-media"
 PUBLIC_BASE="https://test-media.pokoin.com"
 OBJECTS="${POKOIN_OBJECTS:-}"
-PI_OBJECTS="/srv/pokoin/card-images/objects"
+PI_OBJECTS="${POKOIN_MEDIA_FALLBACK_OBJECTS:-}"
 PI_HOST="${POKOIN_MEDIA_FALLBACK_HOST:-}"
-# the host reaches ssh and scp as one argument, so it must not start with a dash nor hold a space or
-# another shell character; nothing is looked up before it is accepted
-if [[ -n "$PI_HOST" && ! "$PI_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]]; then
+# the host reaches ssh and scp as one argument, so it must not start with a dash nor hold a space, a
+# colon or another shell character; a host with a port on it is not one ssh can use, and nothing is
+# looked up before the value is accepted
+if [[ -n "$PI_HOST" && ! "$PI_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]]; then
   echo "invalid POKOIN_MEDIA_FALLBACK_HOST" >&2
+  exit 2
+fi
+# the remote directory belongs to the host and to nothing else: with no host set the variable is not
+# asked for, and with one set the run that was not told names the variable instead of guessing the
+# layout of the machine it reaches
+if [[ -n "$PI_HOST" && -z "$PI_OBJECTS" ]]; then
+  echo "set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects" >&2
+  exit 2
+fi
+# the shape of that directory is held to what a name is made of, the way the host is: absolute, of these
+# characters only, no step out of itself and nothing after its name. It stands in front of every key the
+# run asks the host for, and it goes into a command line the shell on that machine reads, so a value of
+# any other shape is refused before that line is built. A run with no host set is refused the same way:
+# the name it would reach for is the one it was given either way, and a directory holding a space, a
+# quote or a star is a mistyped path rather than a place. The pattern is anchored, and bash reads an
+# anchor as standing before a newline at the end of a string, so a control character is looked for on its
+# own -- the newline that hides behind the anchor above all.
+if [[ -n "$PI_OBJECTS" ]] \
+  && { [[ "$PI_OBJECTS" != /* ]] || [[ ! "$PI_OBJECTS" =~ ^[A-Za-z0-9._/@+-]+$ ]] \
+       || [[ "$PI_OBJECTS" == *[[:cntrl:]]* ]] \
+       || [[ "$PI_OBJECTS" == .. || "$PI_OBJECTS" == ../* || "$PI_OBJECTS" == */.. \
+            || "$PI_OBJECTS" == */[.][.]/* ]]; }; then
+  echo "invalid POKOIN_MEDIA_FALLBACK_OBJECTS" >&2
   exit 2
 fi
 # the store is where the operator keeps it, and the tree holds no guess at it: the run that was not
 # told does not look around for one
 if [[ -z "$OBJECTS" ]]; then
   echo "set POKOIN_OBJECTS to the directory that holds the media objects" >&2
+  exit 2
+fi
+# a name that is not there, or that holds a file, cannot give up any object: read as an empty store
+# it would come back as every key of the list missing from it
+if [[ ! -d "$OBJECTS" ]]; then
+  echo "POKOIN_OBJECTS is not a directory" >&2
   exit 2
 fi
 WRANGLER="${WRANGLER:-$HOME/.bun/bin/wrangler}"
@@ -105,8 +153,14 @@ fi
 # themselves, so a key named twice in the file, or held as two rows of the manifest, would be handed
 # out twice and accounted once. The list keeps one row per key here, the first row it came in on, in
 # the order of the list; an empty list stays empty.
+# The blanks in front of a key come off before that, and before anything else uses the list: they are
+# not part of the name, and the workers take them off on their own, so two rows that differ only by
+# them are one key to the store and to the accounting.
+# What is left with nothing in it is no name, and no worker is handed a blank argument, so it goes with
+# the duplicates rather than joining the list as a key nobody can report a result for. A keys file
+# already drops its blank lines where it is read; a manifest row of spaces is what this pass catches.
 if (( ${#KEYS[@]} > 0 )); then
-  mapfile -t KEYS < <(printf '%s\n' "${KEYS[@]}" | awk '!seen[$0]++')
+  mapfile -t KEYS < <(printf '%s\n' "${KEYS[@]}" | awk '{ sub(/^[ \t]+/, ""); } $0 != "" && !seen[$0]++')
 fi
 
 echo "Keys to process: ${#KEYS[@]}"
@@ -136,6 +190,36 @@ content_type_for() {
   esac
 }
 
+# a key is one name under the object directory. One that reaches above it, that starts at the root of
+# the store, or that runs over two lines is a bad record and not a missing object: it is refused here,
+# before the path is built out of it and before the store, the done list or the fallback host is
+# looked at, and its control characters are shown rather than written.
+#
+# Reaching above the store is a step of its own, and only such a step: the key is "..", one of its
+# components is, or it starts with one. Two dots inside a name are part of that name -- a..b.png and
+# v1..v2.webp are keys this store holds -- so the four shapes are matched one by one instead of ".."
+# anywhere in the string. The middle one spells its dots as bracket classes: an unquoted ".." between
+# two stars does not match a parent step, whatever it looks like it should match.
+key_is_bad() {
+  local key="$1"
+  if [[ "$key" == /* || "$key" == *[[:cntrl:]]* || "$key" == .. || "$key" == ../* \
+    || "$key" == */.. || "$key" == */[.][.]/* ]]; then
+    printf 'invalid key (skipped): %s\n' "${key//[[:cntrl:]]/?}" >&2
+    return 0
+  fi
+  return 1
+}
+
+# the one word a shell on the other machine has to read as this path: the name between single quotes, and
+# every quote that belongs to the name written as closing-quote, quoted-quote, opening-quote. bash's own
+# %q is not used, because the shell behind ssh is the login shell of a machine this run knows nothing
+# about, and the single-quoted form is the one every shell reads the same way; inside those quotes nothing
+# is a substitution, a command or a list of files, and only a quote can end them.
+remote_word() {
+  local path="$1"
+  printf "'%s'" "${path//\'/\'\\\'\'}"
+}
+
 resolve_file() {
   local key="$1"
   local path="${OBJECTS}/${key}"
@@ -143,9 +227,16 @@ resolve_file() {
     printf '%s' "$path"
     return 0
   fi
-  if [[ -n "$PI_HOST" ]] && ssh -o BatchMode=yes -o ConnectTimeout=10 -- "${PI_HOST}" "test -f ${PI_OBJECTS}/${key}" 2>/dev/null; then
+  if [[ -n "$PI_HOST" ]] \
+    && ssh -o BatchMode=yes -o ConnectTimeout=10 -- "${PI_HOST}" \
+      "test -f $(remote_word "${PI_OBJECTS}/${key}")" 2>/dev/null; then
     local tmp
     tmp="$(mktemp -p "${TMPDIR:-/tmp}" "$(basename "$key").XXXXXX")"
+    # the fetch is not given the quotes the test above is: scp in its default mode hands the remote name to
+    # an SFTP server, where no shell reads it and a quote would become part of the name it looks up. The
+    # legacy transport (-O) does let a far shell read it, and a name holding a blank is not one that
+    # transport takes; nothing here asks for it. The directory of the path is held to plain characters
+    # before the host is reached, so only the name of the file can hold a blank at all.
     scp -q -- "${PI_HOST}:${PI_OBJECTS}/${key}" "$tmp"
     printf '%s' "$tmp"
     return 0
@@ -166,6 +257,10 @@ record_result() {
 
 upload_one() {
   local key="$1"
+  if key_is_bad "$key"; then
+    record_result fail "$key"
+    return
+  fi
   if [[ "$FORCE" != "1" ]] && grep -Fxq -- "$key" "$DONE" 2>/dev/null; then
     record_result ok "$key"
     return
@@ -177,6 +272,13 @@ upload_one() {
     alias="$(alias_for "$key")"
     if [[ -n "$alias" ]]; then
       source_key="$alias"
+      # the target of an alias is a key like any other, and a path is built out of it the same way, so
+      # it is refused by the same check and the requested key is the failed one: the record is what the
+      # run handed out, and a bad alias map is a bad record and not a missing object
+      if key_is_bad "$source_key"; then
+        record_result fail "$key"
+        return
+      fi
       if ! file="$(resolve_file "$source_key")"; then
         echo "skip (no source or alias): $key (alias $alias)" >&2
         record_result skip "$key"
@@ -226,7 +328,7 @@ upload_one() {
 }
 
 export ALIASES BUCKET DONE OBJECTS PI_HOST PI_OBJECTS WRANGLER FORCE
-export -f resolve_file upload_one alias_for content_type_for record_result
+export -f resolve_file upload_one alias_for content_type_for record_result key_is_bad remote_word
 
 echo "Uploading with $WRANGLER (parallel ${PARALLEL})…"
 # the status of xargs is captured rather than left to errexit, because a child that exits 255 or dies
@@ -249,8 +351,12 @@ if [[ "$FORCE" == "1" ]]; then
     || REWRITE_STATUS=$?
 fi
 
-# the manifest is the record of what the generator found on neither store: a row with no object and
-# no alias is a key this run cannot be expected to upload, so it is counted apart. The three counts
+# the manifest is the record of what the generator found on neither store: a row with no object and no
+# source the run could look for is a key this run cannot be expected to upload, so it is counted apart.
+# The alias map names a source for a key of its own -- the child tries it for a null row too, whether or
+# not the row carries an aliasOf -- so a key it holds is not one this run gave up on before it looked.
+# A row with an aliasOf is left out of the list as before: its source is the key the alias points at,
+# and the child reports it as a skip when neither that file nor the remote has it. The three counts
 # go on stderr before the HEAD sample, so that a sample fetch which does not come back cannot hide
 # them. The rows are kept in one variable of this shell, not in a file: a child whose record could
 # not be written may have taken the private directory of the run with it, and the counts still have
@@ -258,8 +364,11 @@ fi
 # skip counts as a key the store is missing, which is said apart below and costs the run its 0.
 MANIFEST_ROWS_STATUS=0
 NULL_ROWS="$(node -e "
-const m = JSON.parse(require('fs').readFileSync('${MANIFEST}', 'utf8'));
-for (const e of m.entries) if (e.object === null && !e.aliasOf) console.log(e.key);
+const fs = require('fs');
+const m = JSON.parse(fs.readFileSync('${MANIFEST}', 'utf8'));
+let aliases = {};
+if (fs.existsSync('${ALIASES}')) aliases = JSON.parse(fs.readFileSync('${ALIASES}', 'utf8'));
+for (const e of m.entries) if (e.object === null && !e.aliasOf && !aliases[e.key]) console.log(e.key);
 ")" || MANIFEST_ROWS_STATUS=$?
 
 SKIPPED=0
@@ -357,12 +466,14 @@ const pick = keys.filter((_, i) => i % Math.max(1, Math.floor(keys.length / ${SA
 echo "Done. Uploaded keys recorded in ${DONE}"
 
 # the exit code of a run, in the order of what it means: 4 for a key whose upload failed, for a key
-# that uploaded into a done list that would not take it, for a key that recorded nothing, for an
-# xargs run that stopped before the end of the list, and for the two steps that read or rewrite what
-# the counts are made of; 3 for a key the manifest gives a source; 5 for the HEAD sample that did not
-# come back; and 0 when none of these applies, which is the status of an if that took no branch. The
-# 1 of a preflight check and the 2 of an unusable fallback host or of an object directory the run was
-# not given are long gone by here.
+# the list gave as a path rather than a name, for a key that uploaded into a done list that would not
+# take it, for a key that recorded nothing, for an xargs run that stopped before the end of the list,
+# and for the two steps that read or rewrite what the counts are made of; 3 for a key the manifest
+# gives a source; 5 for the HEAD sample that did not come back; and 0 when none of these applies,
+# which is the status of an if that took no branch. The 1 of a preflight check ended the run before
+# any of this, and so did the 2 of an unusable fallback host, of a host with no remote directory
+# behind it, of a remote directory that is not a plain absolute path, or of an object directory the
+# run was not given or was given as something other than a directory.
 if (( FAILED > 0 || NOTRECORDED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 \
       || MANIFEST_ROWS_STATUS != 0 || REWRITE_STATUS != 0 )); then
   exit 4

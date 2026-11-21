@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Tests for scripts/upload-media-r2.sh: credential loading and preflight, the object directory it
-# has to be told about, the fallback host, the keys skipped for want of a source, the upload whose
-# wrangler call fails, the keys a run failed to account for, the key that is listed twice and the one
-# it cannot record in the done list; and scripts/no-host-names.test.sh and
+# has to be told about, the fallback host, the key that names a path instead of a file of the store,
+# the keys skipped for want of a source, the upload whose wrangler call fails, the keys a run failed
+# to account for, the key that is listed twice or twice with blanks in front of it and the one it
+# cannot record in the done list; and scripts/no-host-names.test.sh and
 # scripts/media-manifest-guard.test.sh as two of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
@@ -312,7 +313,8 @@ fi
 # ---------------------------------------------------------------------------
 # s1..s12: the fallback host, the keys with no source and what the manifest says about them. These
 # cases need ssh and scp to answer, so they run with a second stub directory that records every call
-# instead of the forbidden one above.
+# instead of the forbidden one above. Every run of the group is given the dummy remote directory as
+# well, which a run with no host set ignores.
 # ---------------------------------------------------------------------------
 S2="$TMP/stubs-fallback"
 mkdir -p "$S2" "$TMP/objects2" "$TMP/home-fb"
@@ -321,7 +323,10 @@ SCP_LOG="$TMP/scp.args"
 CALLS2="$TMP/wrangler2.calls"
 FB_KEYS="$TMP/keys2.txt"
 FB_HOST="fallback.example.invalid"   # a dummy, and not a name that resolves
-REMOTE_OBJECTS="/srv/pokoin/card-images/objects"   # PI_OBJECTS in the script under test
+# the remote directory the runs below hand to POKOIN_MEDIA_FALLBACK_OBJECTS: a dummy, and the layout
+# path of no machine, which is the point of the variable
+REMOTE_OBJECTS="/remote/objects"
+want_fallback_objects_line="set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects"
 FB_ALIASES_DEFAULT='{}'
 
 # the fixture manifest and aliases are read by the script with a real node, so a row that says
@@ -333,6 +338,13 @@ log="$SSH_LOG"
 [ "$(basename "$0")" = scp ] && log="$SCP_LOG"
 printf -- '---\n' >> "$log"
 for a in "$@"; do printf '%s\n' "$a" >> "$log"; done
+# SSH_MISS=<text>: the host says no to a path holding this text, so a case can have the keys it names
+# fall through to the alias map and still count what the run asked the host about.
+if [ -n "${SSH_MISS:-}" ]; then
+  case "$*" in
+    *"$SSH_MISS"*) exit 1 ;;
+  esac
+fi
 exit 0
 STUB
 cp "$S2/ssh" "$S2/scp"
@@ -420,9 +432,13 @@ fb_keys() {
   for k in "$@"; do printf '%s\n' "$k" >> "$FB_KEYS"; done
 }
 fb_store() {
-  rm -f "$TMP/objects2"/*
+  rm -rf -- "$TMP/objects2"
+  mkdir -p -- "$TMP/objects2"
   local k
-  for k in "$@"; do printf x > "$TMP/objects2/$k"; done
+  for k in "$@"; do
+    mkdir -p -- "$TMP/objects2/$(dirname -- "$k")"
+    printf x > "$TMP/objects2/$k"
+  done
 }
 
 # fb_manifest <key> <object or -> <aliasOf or -> ...: the rows of the fixture manifest, three
@@ -466,7 +482,9 @@ run_fb() {
   env -i PATH="$S2:/usr/bin:/bin" HOME="$TMP/home-fb" TMPDIR="$TMP/scratch" \
     CLOUDFLARE_API_TOKEN="$DUMMY_TOKEN" CLOUDFLARE_ACCOUNT_ID="$DUMMY_ACCOUNT" \
     WRANGLER="$S2/wrangler" POKOIN_OBJECTS="$TMP/objects2" KEYS_FILE="$FB_KEYS" \
+    POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS" \
     SSH_LOG="$SSH_LOG" SCP_LOG="$SCP_LOG" CALLS2="$CALLS2" REAL_NODE="$REAL_NODE" \
+    SSH_MISS="${SSH_MISS:-}" \
     "$@" bash "$TMP/root/scripts/upload-media-r2.sh" >"$TMP/out2" 2>"$TMP/err2"
   STATUS=$?
   set -e
@@ -517,7 +535,7 @@ BatchMode=yes
 ConnectTimeout=10
 --
 $FB_HOST
-test -f $REMOTE_OBJECTS/b.png
+test -f '$REMOTE_OBJECTS/b.png'
 EXPECT
 )"
 got_ssh=""
@@ -542,7 +560,7 @@ fi
 fb_keys b.png
 fb_store
 fb_manifest b.png "/store/b.png" -
-for bad_value in '-oProxyCommand=x' 'a b' 'x;id'; do
+for bad_value in '-oProxyCommand=x' 'a b' 'x;id' 'host:22'; do
   run_fb s3 POKOIN_MEDIA_FALLBACK_HOST="$bad_value"
   if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
     && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
@@ -551,12 +569,57 @@ for bad_value in '-oProxyCommand=x' 'a b' 'x;id'; do
     bad "s3: value [$bad_value] status=$STATUS err=[$ERR] ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS"
   fi
 done
+
+# s3n. a value that runs over two lines: the check is anchored at both ends, and the second line of
+#      a host is a command the run would hand to ssh. The value is named by its shape, not printed.
+run_fb s3n POKOIN_MEDIA_FALLBACK_HOST=$'host\nx'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
+  ok "s3n (item 5): a host value with an embedded newline: exit 2, only that line on stderr, no ssh, scp or wrangler call"
+else
+  bad "s3n: status=$STATUS err=[$ERR] ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS"
+fi
+
+# s3t. the two shapes a plain host token is there to let through: a user with an at-sign, and a host
+#      with its dots. Each reaches ssh as exactly one argument, after the --.
+for good_value in 'user@host' 'host.example.invalid'; do
+  run_fb s3t POKOIN_MEDIA_FALLBACK_HOST="$good_value"
+  if [[ "$STATUS" -eq 0 ]] && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$ERR" != *"invalid"* ]] \
+    && grep -Fxq -- '--' "$SSH_LOG" && grep -Fxq -- "$good_value" "$SSH_LOG"; then
+    ok "s3t (item 5): the value [$good_value] is accepted and reaches ssh as one argument"
+  else
+    bad "s3t: value [$good_value] status=$STATUS ssh=$SSH_CALLS ssh_log=[$(tr '\n' '|' < "$SSH_LOG" 2>/dev/null)] err=[$ERR]"
+  fi
+done
 run_fb s3e POKOIN_MEDIA_FALLBACK_HOST=
 if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"invalid"* ]] \
   && [[ "$ERR" == *"skip (no source): b.png"* ]]; then
   ok "s3 (c): an empty value means no fallback, not an invalid one"
 else
   bad "s3e: status=$STATUS ssh=$SSH_CALLS err=[$ERR]"
+fi
+
+# s3f. a host set and no remote directory to fetch out of: the run names the variable that is missing
+#      and ends 2, and it does that before ssh is asked anything at all
+fb_keys b.png
+fb_store
+fb_manifest b.png "/store/b.png" -
+run_fb s3f POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS=
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_fallback_objects_line" ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
+  ok "s3f: host set and remote directory empty: exit 2, only [$want_fallback_objects_line], no ssh, scp or wrangler call"
+else
+  bad "s3f: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s3g. no host and no remote directory: nothing is fetched from nowhere, so the variable is not asked
+#      for and the run goes on to the skip it went on to before
+run_fb s3g POKOIN_MEDIA_FALLBACK_HOST= POKOIN_MEDIA_FALLBACK_OBJECTS=
+if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"$want_fallback_objects_line"* ]] \
+  && [[ "$ERR" == *"skip (no source): b.png"* ]]; then
+  ok "s3g: with no host the remote directory is ignored, empty or not"
+else
+  bad "s3g: status=$STATUS ssh=$SSH_CALLS err=[$ERR]"
 fi
 
 # s0. the object directory has no default in the tree: with POKOIN_OBJECTS unset the run says which
@@ -623,6 +686,51 @@ else
   bad "s0d: status=$STATUS err=[$ERR] want=[$want_creds_line]"
 fi
 
+# s0e/s0f. set, but not a directory: a name that is not there and a regular file, the two shapes a
+#          typo makes. The store cannot be read out of either, so the run says so and ends 2 before
+#          it looks at a key, at the credentials or at the done list.
+want_not_a_dir_line="POKOIN_OBJECTS is not a directory"
+for not_a_dir in "$TMP/no-such-dir" "$TMP/objects/a.png"; do
+  run_objects s0e "$not_a_dir"
+  if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_not_a_dir_line" ]] \
+    && [[ ! -e "$CALLS" ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]] \
+    && [[ ! -e "$TMP/root/.media-upload.done" ]]; then
+    ok "s0e/s0f: POKOIN_OBJECTS=[$not_a_dir]: exit 2, only [$want_not_a_dir_line], no wrangler, ssh or scp call, no done list touched"
+  else
+    bad "s0e/s0f: POKOIN_OBJECTS=[$not_a_dir] status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none) forbidden=$((FORB_NOW - FORB_BEFORE)) done=$([[ -e "$TMP/root/.media-upload.done" ]] && echo written || echo untouched)"
+  fi
+done
+
+# s0g. an unusable fallback host beside a store that is not a directory: the host is still validated
+#      first, so the check of the directory holds the place the unset one held
+run_objects s0g "$TMP/no-such-dir" POKOIN_MEDIA_FALLBACK_HOST='-oProxyCommand=x'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
+  && [[ ! -e "$CALLS" ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0g: the fallback host is validated before the object directory is looked at"
+else
+  bad "s0g: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# s0h. a usable host and the remote directory not given at all: the run says which variable it is
+#      missing, before the local store is asked for and before any ssh
+run_objects s0h "" POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST"
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_fallback_objects_line" ]] \
+  && [[ ! -e "$CALLS" ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0h: host set and remote directory unset: exit 2, only that line, ahead of the local store and of any ssh"
+else
+  bad "s0h: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# s0i. the same with the remote directory given: the run goes on and asks for the local store, which
+#      is what shows the two checks are separate questions
+run_objects s0i "" POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_objects_line" ]] && [[ ! -e "$CALLS" ]] \
+  && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0i: a run with a host and a remote directory but no local store asks for POKOIN_OBJECTS alone"
+else
+  bad "s0i: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
 # s4. one key resolvable and one not: the resolvable one is still uploaded, the run exits 3
 fb_keys a.png b.png
 fb_store a.png
@@ -652,6 +760,54 @@ if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] 
   ok "s5: an alias whose source is missing too is counted as skipped: no source, and exits 3"
 else
   bad "s5: status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s5b. a row with no object and no aliasOf, but a key that media-aliases.json names: the alias map is
+#      the record of a source the run is told to look for, so a run that finds neither the key nor its
+#      alias is a real skip and not a free line about the manifest.
+fb_keys null2.png
+fb_store
+fb_manifest null2.png - -
+FB_ALIASES='{"null2.png":"gone.png"}'
+run_fb s5b
+FB_ALIASES=''
+if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] \
+  && [[ "$ERR" == *"skip (no source or alias): null2.png (alias gone.png)"* ]] \
+  && [[ "$ERR" == *$'\n'"1 key skipped: no source"* ]] \
+  && [[ "$ERR" != *"no object in the manifest"* ]]; then
+  ok "s5b (item 7): a null row the alias map names, unresolvable: [1 key skipped: no source] and exit 3, no free no-object line"
+else
+  bad "s5b: status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s5c. the same row with nothing in the alias map: it stays what it was, a key no run can upload, said
+#      apart and costing nothing
+fb_keys null2.png
+fb_store
+fb_manifest null2.png - -
+run_fb s5c
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] \
+  && [[ "$ERR" == *"1 key has no object in the manifest"* ]] \
+  && [[ "$ERR" != *"skipped: no source"* ]]; then
+  ok "s5c (item 7): a null row the alias map does not name is still counted apart and ends 0"
+else
+  bad "s5c: status=$STATUS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s5d. and the same row with its alias on disk: it goes up under the key it was asked for, which is
+#      what it did before the count changed and still does
+fb_keys null2.png
+fb_store present.png
+fb_manifest null2.png - -
+FB_ALIASES='{"null2.png":"present.png"}'
+run_fb s5d
+FB_ALIASES=''
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/null2\.png' "$CALLS2" \
+  && [[ "$ERR" != *"no object in the manifest"* ]] && [[ "$ERR" != *"skip"* ]]; then
+  ok "s5d (item 7): a null row whose alias is on disk uploads under its own key and costs nothing"
+else
+  bad "s5d: status=$STATUS wrangler=$WR_CALLS calls=[$(cat "$CALLS2" 2>/dev/null)] err=[$ERR]"
 fi
 
 # s6. the keys the committed manifest records with no object are reported apart and cost nothing:
@@ -736,7 +892,10 @@ fi
 # s10. the host pattern is plain ASCII, its at-sign is the ASCII one, and user@host is accepted
 pattern_ascii() {
   local file="$1" line n
-  line="$(grep -F 'A-Za-z0-9' "$file")" || return 1
+  # the host pattern is the line that spells a host as a letter and then the characters of a name. The
+  # remote directory has a class of its own since item D, and it is not what this case looks at, so the
+  # host is found by the two classes standing next to each other
+  line="$(grep -F '[A-Za-z0-9][A-Za-z0-9._@-]' "$file")" || return 1
   n="$(printf '%s\n' "$line" | grep -c .)"
   if [[ "$n" -ne 1 ]]; then return 1; fi
   if LC_ALL=C grep -q '[^ -~]' <<<"$line"; then return 1; fi
@@ -747,6 +906,13 @@ for pattern_file in "$SRC" "$HERE/media-manifest.mjs"; do
     ok "s10 (E): the host pattern of $(basename "$pattern_file") is one line of plain ASCII with an ASCII @"
   else
     bad "s10: the host pattern of $pattern_file is missing, ambiguous or not plain ASCII"
+  fi
+  # the colon is not one of the characters: it is how a URL splits a port off a host, and ssh and scp
+  # take such a value for a host they cannot reach, so the pattern holds no colon at all
+  if grep -F '[A-Za-z0-9][A-Za-z0-9._@-]' "$pattern_file" | grep -q ':'; then
+    bad "s10b: the host pattern of $(basename "$pattern_file") still lets a colon through"
+  else
+    ok "s10b (item 5): the host pattern of $(basename "$pattern_file") holds no colon"
   fi
 done
 fb_keys b.png
@@ -1165,6 +1331,39 @@ else
   bad "s26: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS dup=$dup_uploads err=[$ERR]"
 fi
 
+# s26b (item 6). two keys that differ only by the blanks in front of them: the dedupe of the string
+#                sees two, the workers see one -- xargs -I takes the blanks off before it hands the
+#                argument over -- so the run handed two keys out, got one record back and ended 4 with
+#                an unaccounted key for a list that held nothing wrong. The blanks come off the keys
+#                before anything else uses them, which makes the two the same key to both ends.
+fb_keys ' a.png' 'a.png'
+fb_store a.png
+fb_manifest a.png "/store/a.png" -
+run_fb s26b PARALLEL=1
+a_uploads="$(wrangler_calls_for a.png)"
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 1"* ]] \
+  && [[ "$a_uploads" -eq 1 ]] && [[ "$WR_CALLS" -eq 1 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$(done_list)" == "a.png" ]]; then
+  ok "s26b (F): [ a.png] and [a.png] in one keys file are one key: 1 to process, one upload, exit 0"
+else
+  bad "s26b: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS uploads=$a_uploads done=[$(done_list)] err=[$ERR]"
+fi
+
+# s26c (item 6). the strip leaves the keys that are not blanks alone: a name with a blank inside it is
+#                still the name it was, and a key that starts with a dash is still data
+fb_keys ' k1.png' 'k2 p x.png' '-c.png'
+fb_store 'k2 p x.png' '-c.png'
+fb_manifest 'k2 p x.png' "/store/k2 p x.png" - '-c.png' "/store/-c.png" -
+run_fb s26c PARALLEL=1
+if [[ "$STATUS" -eq 3 ]] && [[ "$OUT" == *"Keys to process: 3"* ]] \
+  && [[ "$WR_CALLS" -eq 2 ]] && grep -qF -- 'pokoin-test-media/k2 p x.png ' "$CALLS2" \
+  && grep -qF -- 'pokoin-test-media/-c.png ' "$CALLS2" \
+  && [[ "$ERR" == *"skip (no source): k1.png"* ]] && [[ "$ERR" != *"skip (no source):  k1.png"* ]]; then
+  ok "s26c (F): the blanks that come off are the ones in front: the name holds its own, the key holds its dash"
+else
+  bad "s26c: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS calls=[$(tr '\n' '|' < "$CALLS2" 2>/dev/null)] err=[$ERR]"
+fi
+
 # s27 (B). the done list will not take a row, because it is not writable: every key still goes up,
 #          but a rerun of this bucket would put them up again, so the run says so and ends 4.
 fb_keys good.png other.png
@@ -1297,6 +1496,394 @@ if [[ "$STATUS" -eq 0 ]] && [[ -z "$ERR" ]] && [[ "$WR_CALLS" -eq 0 ]] \
   ok "s31b: keys that are all recorded already end 0 with no stderr and no put"
 else
   bad "s31b: status=$STATUS wrangler=$WR_CALLS err=[$ERR] done=[$(cat "$TMP/root/.media-upload.done")]"
+fi
+
+# ---------------------------------------------------------------------------
+# s33..s35: a key that names a path instead of a file under the object directory. The key comes from
+# the manifest or from the keys file, and the first thing a run does with it is build
+# "$OBJECTS/$key" out of it, so the shape is refused there: it is a bad record, not a missing object,
+# and it costs the run the same 4 a failed upload costs.
+# ---------------------------------------------------------------------------
+
+# s33. three keys of that shape beside a good one, with a fallback host configured: each says so
+#      once, none of them reaches the store, the host or wrangler, and the good key still goes up.
+fb_keys '../x.png' 'a/../b.png' '/etc/x' good.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" -
+run_fb s33 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+DONE_ROWS="$(done_list | tr '\n' '|')"
+for want_bad in '../x.png' 'a/../b.png' '/etc/x'; do
+  if grep -Fq -- "invalid key (skipped): $want_bad" "$TMP/err2"; then
+    ok "s33: the key [$want_bad] is refused with its own line"
+  else
+    bad "s33: no refusal line for [$want_bad]: err=[$ERR]"
+  fi
+done
+if [[ "$STATUS" -eq 4 ]] && [[ "$OUT" == *"Keys to process: 4"* ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/good\.png' "$CALLS2" \
+  && [[ "$err_last" == "$(line_for 3 'key failed to upload' 'keys failed to upload')" ]] \
+  && [[ "$ERR" != *"skipped: no source"* ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$DONE_ROWS" == "good.png|" ]]; then
+  ok "s33 (a): a key that is a path: no ssh, scp or store lookup for it, the good key uploaded, [$(line_for 3 'key failed to upload' 'keys failed to upload')] last, exit 4"
+else
+  bad "s33: status=$STATUS keys=[$(printf '%s\n' "$OUT" | head -1)] ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS err_last=[$err_last] done=[$DONE_ROWS] err=[$ERR]"
+fi
+
+# s34. a keys file with a carriage return inside a key, which is what a file written on another
+#      system holds: the control character is shown and never written out, the key is refused, and
+#      the key beside it is accounted for.
+fb_keys good.png $'cr\rfile.png'
+fb_store good.png
+fb_manifest good.png "/store/good.png" -
+run_fb s34 PARALLEL=1
+if [[ "$STATUS" -eq 4 ]] && grep -Fq -- 'invalid key (skipped): cr?file.png' "$TMP/err2" \
+  && [[ "$OUT" == *"Keys to process: 2"* ]] && [[ "$SSH_CALLS" -eq 0 ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$(done_list)" == "good.png" ]] && printf '%s\n' "$ERR" | grep -vq $'\r'; then
+  ok "s34 (b): a key with a carriage return: refused as [cr?file.png], the good key uploaded alone, exit 4"
+else
+  bad "s34: status=$STATUS keys=[$(printf '%s\n' "$OUT" | head -1)] ssh=$SSH_CALLS wrangler=$WR_CALLS done=[$(done_list)] err=[$ERR]"
+fi
+
+# s35. the validator itself, extracted from the script and called with the keys a line-based list
+#      cannot hand it: a key with an embedded newline. The shapes the run must accept are called in
+#      the same harness, so the refusal is not a catch-all.
+awk '/^key_is_bad\(\) \{/,/^\}$/' "$SRC" > "$TMP/key_is_bad.sh"
+if [[ ! -s "$TMP/key_is_bad.sh" ]]; then
+  bad "s35: no key_is_bad function was found in $SRC to extract"
+else
+  cat > "$TMP/key-cases.bash" <<'HARNESS'
+#!/usr/bin/env bash
+set +e
+# shellcheck disable=SC1090
+source "$1"
+problems=0
+# key_case <name> <want status> <want line or -> <key>
+key_case() {
+  local name="$1" want_status="$2" want_line="$3" key="$4" got_line got_status
+  got_line="$(key_is_bad "$key" 2>&1 >/dev/null)"
+  got_status=$?
+  if [[ "$got_status" -ne "$want_status" ]]; then
+    echo "FAIL: $name: status $got_status, expected $want_status"
+    problems=$((problems + 1))
+    return
+  fi
+  if [[ "$want_line" == "-" ]]; then
+    if [[ -n "$got_line" ]]; then
+      echo "FAIL: $name: it printed [$got_line] on a key it must accept"
+      problems=$((problems + 1))
+    fi
+    return
+  fi
+  if [[ "$got_line" != "$want_line" ]]; then
+    echo "FAIL: $name: line [$got_line], expected [$want_line]"
+    problems=$((problems + 1))
+    return
+  fi
+  echo "ok: $name"
+}
+key_case 'a key above the store' 1 '-' 'a.png'
+key_case 'a key in a folder of the store' 1 '-' 'figure-masks-whole/v1.webp'
+key_case 'a key whose name starts with a dash' 1 '-' '-c.png'
+key_case 'a key with single dots in it' 1 '-' 'a.b.c.png'
+# item A: two dots inside a name are part of the name. A parent step is one component of its own, and
+# only such a component is a step above the store.
+key_case 'a key whose name holds two dots' 1 '-' 'a..b.png'
+key_case 'a key whose name holds two dots and a folder' 1 '-' 'x/a..b.png'
+key_case 'a key between two dots' 1 '-' 'v1..v2.webp'
+key_case 'a key that is only two dots' 0 'invalid key (skipped): ..' '..'
+key_case 'a key that ends in a parent step' 0 'invalid key (skipped): x/..' 'x/..'
+key_case 'a key that reaches above the store' 0 'invalid key (skipped): ../x.png' '../x.png'
+key_case 'a key with a parent step inside it' 0 'invalid key (skipped): a/../b.png' 'a/../b.png'
+key_case 'a key that is an absolute path' 0 'invalid key (skipped): /etc/x' '/etc/x'
+key_case 'a key with an embedded newline' 0 'invalid key (skipped): a?b.png' $'a\nb.png'
+key_case 'a key with an embedded carriage return' 0 'invalid key (skipped): a?b.png' $'a\rb.png'
+key_case 'a key with an embedded tab' 0 'invalid key (skipped): a?b.png' $'a\tb.png'
+[[ "$problems" -eq 0 ]] && echo 'all passed'
+exit "$problems"
+HARNESS
+  kfail=0
+  kout="$(bash "$TMP/key-cases.bash" "$TMP/key_is_bad.sh" 2>&1)" || kfail=1
+  if [[ "$kfail" -eq 0 ]] && [[ "$kout" == *"all passed"* ]]; then
+    while IFS= read -r line; do
+      [[ "$line" == 'ok: '* ]] && ok "key validator: ${line#ok: }"
+    done <<< "$kout"
+  else
+    printf '%s\n' "$kout"
+    bad "s35: the extracted key validator did not hold the contract (rc=$kfail)"
+  fi
+fi
+
+# s36 (item A). two dots inside a name are part of the name: three keys of that shape, one of them in
+#               a folder of the store, go up like any other key. The fallback host is set so that a
+#               refusal would also show as a store lookup and an ssh call the run must not make.
+fb_keys 'a..b.png' 'v1..v2.webp' 'x/a..b.png' good.png
+fb_store 'a..b.png' 'v1..v2.webp' 'x/a..b.png' good.png
+fb_manifest 'a..b.png' "/store/a..b.png" - 'v1..v2.webp' "/store/v1..v2.webp" - \
+  'x/a..b.png' "/store/x/a..b.png" - good.png "/store/good.png" -
+run_fb s36 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 4"* ]] \
+  && [[ "$WR_CALLS" -eq 4 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] \
+  && [[ "$ERR" != *"invalid key"* ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$(done_list | sort | tr '\n' '|')" == "a..b.png|good.png|v1..v2.webp|x/a..b.png|" ]]; then
+  ok "s36 (item A): [a..b.png], [v1..v2.webp] and [x/a..b.png] are names and not parent steps: 4 keys, 4 uploads, exit 0"
+else
+  bad "s36: status=$STATUS keys=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS ssh=$SSH_CALLS done=[$(done_list | tr '\n' '|')] err=[$ERR]"
+fi
+
+# s37 (item B). a key that names nothing is no key: the workers take no blank argument, so a run that
+#               counted one would hand out a name it could never get a record for. The keys file already
+#               ignores a blank line, and a line of blanks alone is what the strip of the leading blanks
+#               turns into nothing -- the count and the work must say the same thing about it.
+fb_keys '   ' '' good.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" -
+run_fb s37 PARALLEL=1
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 1"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$ERR" != *"invalid key"* ]] && [[ "$(done_list)" == "good.png" ]]; then
+  ok "s37 (item B): a blank-only line and an empty line of the keys file are no keys: 1 to process, one upload, exit 0"
+else
+  bad "s37: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS done=[$(done_list)] err=[$ERR]"
+fi
+
+# s37b (item B). the same empty key coming from the manifest, where no line filter runs first: the row
+#                is there, the strip leaves it with no name, and the list the run counts is the list it
+#                hands out. It goes with the duplicates, before anything counts a key.
+fb_manifest '  ' "/store/none.png" - good.png "/store/good.png" -
+fb_store good.png
+run_fb s37b PARALLEL=1 KEYS_FILE=
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 1"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$ERR" != *"invalid key"* ]] && [[ "$(done_list)" == "good.png" ]]; then
+  ok "s37b (item B): a manifest row with an empty key is dropped before the list is counted: 1 to process, exit 0"
+else
+  bad "s37b: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS ssh=$SSH_CALLS done=[$(done_list)] err=[$ERR]"
+fi
+
+# s37c (item B). the empty key alone in the file is nothing to do, not a failure and not a key: the run
+#                that uploads nothing and says nothing ends 0, as the empty keys file does (s31).
+fb_keys '   '
+fb_store
+fb_manifest good.png "/store/good.png" -
+run_fb s37c PARALLEL=1
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 0"* ]] \
+  && [[ "$WR_CALLS" -eq 0 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" == "" ]]; then
+  ok "s37c (item B): a keys file that holds one blank line only is a run with nothing to do: 0 keys, exit 0, nothing on stderr"
+else
+  bad "s37c: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s38 (item C). an alias target is a key like any other, and the child builds a path out of it once the
+#               requested key is not on the store: a target that is a path above the store is refused
+#               where a key of its own would be, before that path is built, before the store or the host
+#               is asked for it, and the requested key is a failed key rather than a missing one. The
+#               good alias beside it goes on working.
+fb_keys bad1.png good1.png
+fb_store present.png
+fb_manifest bad1.png "/store/bad1.png" - good1.png "/store/good1.png" -
+FB_ALIASES='{"bad1.png":"../x.png","good1.png":"present.png"}'
+# the host holds neither key, so both fall through to the alias map and the only thing left to see is
+# what the run asks the host about for a target
+SSH_MISS='.png'
+run_fb s38 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+FB_ALIASES=''
+SSH_MISS=''
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+if [[ "$STATUS" -eq 4 ]] && grep -Fq -- 'invalid key (skipped): ../x.png' "$TMP/err2" \
+  && [[ "$SSH_CALLS" -eq 2 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/good1\.png' "$CALLS2" \
+  && [[ "$err_last" == "$(line_for 1 'key failed to upload' 'keys failed to upload')" ]] \
+  && [[ "$ERR" != *"skip (no source or alias)"* ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$(done_list)" == "good1.png" ]]; then
+  ok "s38 (item C): an alias target that is a path: refused, the host asked once per requested key and never for the target, [$(line_for 1 'key failed to upload' 'keys failed to upload')] and exit 4"
+else
+  bad "s38: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS last=[$err_last] done=[$(done_list)] calls=[$(tr '\n' '|' < "$CALLS2" 2>/dev/null)] err=[$ERR]"
+fi
+
+# s38b (item C). a target with a parent step inside it is the same refusal, and a name under the store
+#                is untouched by it: the check is on the shape of the target, not on the alias path
+fb_keys bad1.png good1.png
+fb_store present.png
+fb_manifest bad1.png "/store/bad1.png" - good1.png "/store/good1.png" -
+FB_ALIASES='{"bad1.png":"a/../b.png","good1.png":"present.png"}'
+SSH_MISS='.png'
+run_fb s38b POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+FB_ALIASES=''
+SSH_MISS=''
+if [[ "$STATUS" -eq 4 ]] && [[ "$SSH_CALLS" -eq 2 ]] && [[ "$SCP_CALLS" -eq 0 ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && grep -Fq -- 'invalid key (skipped): a/../b.png' "$TMP/err2" \
+  && [[ "$(done_list)" == "good1.png" ]]; then
+  ok "s38b (item C): a target with a parent step inside it is refused the same way, one step before any lookup"
+else
+  bad "s38b: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS done=[$(done_list)] err=[$ERR]"
+fi
+
+# s39 (item D). the remote test is one command line, and the shell that reads it is on the other
+#               machine: a key with a space in it is two words there, a quote in it closes the command
+#               and everything after it is whatever the key says, and a star is a list of files. The path
+#               goes over as one quoted word -- not with bash's own quoting, because the shell behind ssh
+#               is the login shell of a machine this run knows nothing about.
+# The words are spelled here, not recomputed, so a case cannot pass by agreeing with the same
+# construction twice. A name holding a single quote is not in the table: xargs reads the quotes of its own
+# input before the key reaches a child, so such a key never arrives to be quoted at all (s39b builds the
+# word itself). The rows are pairs of lines -- a key, then the one line the host has to be handed for it --
+# because a key may hold any delimiter a table would use.
+while read -r d1_key; do
+  read -r d1_want
+  fb_keys "$d1_key"
+  fb_store
+  fb_manifest "$d1_key" "/store/$d1_key" -
+  run_fb s39 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+  d1_got="$(tail -1 "$SSH_LOG" 2>/dev/null || printf '(no call)')"
+  if [[ "$SSH_CALLS" -eq 1 ]] && [[ "$d1_got" == "$d1_want" ]] && [[ "$STATUS" -eq 0 ]] \
+    && [[ "$WR_CALLS" -eq 1 ]]; then
+    ok "s39 (item D): the key [$d1_key] reaches the host as the one word [$d1_got]"
+  else
+    bad "s39: key=[$d1_key] status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS got=[$d1_got] want=[$d1_want] err=[$ERR]"
+  fi
+done <<'D1CASES'
+my card.png
+test -f '/remote/objects/my card.png'
+a*b.png
+test -f '/remote/objects/a*b.png'
+a$(x).png
+test -f '/remote/objects/a$(x).png'
+a;b.png
+test -f '/remote/objects/a;b.png'
+a|b.png
+test -f '/remote/objects/a|b.png'
+a`x`.png
+test -f '/remote/objects/a`x`.png'
+a[b].png
+test -f '/remote/objects/a[b].png'
+D1CASES
+
+# s39b (item D). the helper on its own, extracted from the script, for the name xargs cannot hand over:
+#                the quote a key holds has to leave a word that the far shell reads as that one name.
+awk '/^remote_word\(\) \{/,/^\}$/' "$SRC" > "$TMP/remote_word.sh"
+if [[ ! -s "$TMP/remote_word.sh" ]]; then
+  bad "s39b: no remote_word function was found in $SRC to extract"
+else
+  cat > "$TMP/word-cases.bash" <<'HARNESS'
+#!/usr/bin/env bash
+set +e
+# shellcheck disable=SC1090
+source "$1"
+problems=0
+word_case() {
+  local name="$1" want="$2" path="$3" got
+  got="$(remote_word "$path")"
+  if [[ "$got" != "$want" ]]; then
+    echo "FAIL: $name: word [$got], expected [$want]"
+    problems=$((problems + 1))
+    return
+  fi
+  # the word is read back by a plain shell: what comes out has to be the path, exactly once
+  local -a read_back=()
+  mapfile -t read_back < <(eval "set -- $got; printf '%s\n' \"\$@\"")
+  if [[ "${#read_back[@]}" -ne 1 || "${read_back[0]}" != "$path" ]]; then
+    echo "FAIL: $name: a shell reads it as ${#read_back[@]} word(s) [${read_back[*]}], expected the path alone"
+    problems=$((problems + 1))
+    return
+  fi
+  echo "ok: $name"
+}
+word_case 'a name with a blank in it' "'/remote/objects/my card.png'" '/remote/objects/my card.png'
+word_case 'a name with a quote in it' "'/remote/objects/it'\\''s.png'" "/remote/objects/it's.png"
+word_case 'a name with a star in it' "'/remote/objects/a*b.png'" '/remote/objects/a*b.png'
+word_case 'a name with a substitution in it' "'/remote/objects/a\$(x).png'" '/remote/objects/a$(x).png'
+word_case 'a name with two quotes in it' "'/remote/objects/a'\\''b'\\''c.png'" "/remote/objects/a'b'c.png"
+[[ "$problems" -eq 0 ]] && echo 'all passed'
+exit "$problems"
+HARNESS
+  wfail=0
+  wout="$(bash "$TMP/word-cases.bash" "$TMP/remote_word.sh" 2>&1)" || wfail=1
+  if [[ "$wfail" -eq 0 ]] && [[ "$wout" == *"all passed"* ]]; then
+    while IFS= read -r line; do
+      [[ "$line" == 'ok: '* ]] && ok "remote word: ${line#ok: }"
+    done <<< "$wout"
+  else
+    printf '%s\n' "$wout"
+    bad "s39b: the extracted remote-word helper did not hold the contract (rc=$wfail)"
+  fi
+fi
+
+# s3o (item D). the remote directory is validated where the host is: it has to be an absolute path of
+#              plain characters, no parent step in it and nothing after its name, because it is put in
+#              front of every key the run asks the host for.
+want_invalid_objects_line="invalid POKOIN_MEDIA_FALLBACK_OBJECTS"
+# shellcheck disable=SC2016
+for bad_dir in '/remote obj' "/remote/obj's" '/remote/$(x)' '/remote/`x`' '/remote/*' '/remote/a?b' \
+  '/remote/;id' '/remote/a|b' '/remote/../objects' '/remote/objects/..' '..' 'remote/objects' \
+  '/remote/objects ' '/remote/objects/a b'; do
+  run_fb s3o POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$bad_dir"
+  if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
+    && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
+    ok "s3o (item D): remote directory [$bad_dir]: exit 2, only [$want_invalid_objects_line], no ssh, scp or wrangler call"
+  else
+    bad "s3o: value=[$bad_dir] status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS err=[$ERR]"
+  fi
+done
+
+# s3s (item D). a name with a newline at its end is the one shape an anchored pattern lets through: bash
+# reads the $ as standing before a newline at the end of the string, so what reaches the command is longer
+# than the name the value spells. The newline is put on by hand, because a command substitution takes the
+# trailing ones off and would hand over the plain name.
+run_fb s3s POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"$'\n'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]]; then
+  ok "s3s (item D): a remote directory that ends with a newline is refused, though the pattern holds no newline"
+else
+  bad "s3s: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS err=[$(printf %s "$ERR" | tr '\n' '|')]"
+fi
+
+# s3p (item D). the shapes that are a directory of plain characters go through and are used as given
+for good_dir in '/remote/objects' '/remote/obj-1' '/remote/obj_2' '/remote/a@b' '/remote/c+d' '/remote/v1.2'; do
+  fb_keys b.png
+  fb_store
+  fb_manifest b.png "/store/b.png" -
+  run_fb s3p POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$good_dir"
+  if [[ "$STATUS" -eq 0 ]] && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$SCP_CALLS" -eq 1 ]] \
+    && [[ "$ERR" != *"$want_invalid_objects_line"* ]] && grep -Fq -- "$good_dir/b.png" "$SSH_LOG"; then
+    ok "s3p (item D): the remote directory [$good_dir] is accepted, and the key is asked for under it"
+  else
+    bad "s3p: value=[$good_dir] status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS log=[$(tr '\n' '|' < "$SSH_LOG" 2>/dev/null)] err=[$ERR]"
+  fi
+done
+
+# s3q (item D). a value that cannot be a directory is a typo whatever the host says, so it is refused
+#              with no host set too; an empty one stays the unset it always was (s3g)
+run_fb s3q POKOIN_MEDIA_FALLBACK_HOST= POKOIN_MEDIA_FALLBACK_OBJECTS='/remote/*'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]]; then
+  ok "s3q (item D): with no host set an unusable remote directory is still refused, and an empty one is not (s3g)"
+else
+  bad "s3q: status=$STATUS ssh=$SSH_CALLS err=[$ERR]"
+fi
+
+# s0j/s0k (item D). the order: the host first, then its directory being asked for, then its shape, then
+#              the local store. Each run below is missing more than one thing and names the first.
+run_objects s0j "" POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS='/remote/*'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
+  && [[ "$ERR" != *"$want_objects_line"* ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0j: the shape of the remote directory is refused before the local store is asked for"
+else
+  bad "s0j: status=$STATUS err=[$ERR]"
+fi
+run_objects s0k "" POKOIN_MEDIA_FALLBACK_HOST='-oProxyCommand=x' POKOIN_MEDIA_FALLBACK_OBJECTS='/remote/*'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]]; then
+  ok "s0k: an unusable host is still the first thing refused, before the directory that belongs to it"
+else
+  bad "s0k: status=$STATUS err=[$ERR]"
+fi
+run_objects s0l "" POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS=
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_fallback_objects_line" ]]; then
+  ok "s0l: a directory that is missing is asked for, not called invalid: the two lines stay apart"
+else
+  bad "s0l: status=$STATUS err=[$ERR] want=[$want_fallback_objects_line]"
 fi
 
 # s12. the repository-wide check runs as a step of this suite, so its failure fails the suite
