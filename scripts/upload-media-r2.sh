@@ -198,12 +198,37 @@ const pick = keys.filter((_, i) => i % Math.max(1, Math.floor(keys.length / ${SA
 
 echo "Done. Uploaded keys recorded in ${DONE}"
 
+# the manifest is the record of what the generator found on neither store: a row with no object and
+# no alias is a key this run cannot be expected to upload, so it is counted apart
+NULL_OBJECT="${WORK}/no-object-in-manifest"
+node -e "
+const m = JSON.parse(require('fs').readFileSync('${MANIFEST}', 'utf8'));
+for (const e of m.entries) if (e.object === null && !e.aliasOf) console.log(e.key);
+" > "$NULL_OBJECT"
+
 SKIPPED=0
+NO_OBJECT=0
 if [[ -s "$SKIP_LIST" ]]; then
-  mapfile -t SKIPPED_KEYS < "$SKIP_LIST"
-  SKIPPED=${#SKIPPED_KEYS[@]}
+  while IFS= read -r skipped_key; do
+    if grep -Fxq -- "$skipped_key" "$NULL_OBJECT"; then
+      NO_OBJECT=$((NO_OBJECT + 1))
+    else
+      SKIPPED=$((SKIPPED + 1))
+    fi
+  done < "$SKIP_LIST"
+fi
+if (( NO_OBJECT > 0 )); then
+  if (( NO_OBJECT == 1 )); then
+    echo "1 key has no object in the manifest" >&2
+  else
+    echo "$NO_OBJECT keys have no object in the manifest" >&2
+  fi
 fi
 if (( SKIPPED > 0 )); then
-  echo "$SKIPPED keys skipped: no source" >&2
+  if (( SKIPPED == 1 )); then
+    echo "1 key skipped: no source" >&2
+  else
+    echo "$SKIPPED keys skipped: no source" >&2
+  fi
   exit 3
 fi
