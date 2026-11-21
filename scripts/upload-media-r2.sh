@@ -51,9 +51,10 @@ PUBLIC_BASE="https://test-media.pokoin.com"
 OBJECTS="${POKOIN_OBJECTS:-}"
 PI_OBJECTS="${POKOIN_MEDIA_FALLBACK_OBJECTS:-}"
 PI_HOST="${POKOIN_MEDIA_FALLBACK_HOST:-}"
-# the host reaches ssh and scp as one argument, so it must not start with a dash nor hold a space or
-# another shell character; nothing is looked up before it is accepted
-if [[ -n "$PI_HOST" && ! "$PI_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._@:-]*$ ]]; then
+# the host reaches ssh and scp as one argument, so it must not start with a dash nor hold a space, a
+# colon or another shell character; a host with a port on it is not one ssh can use, and nothing is
+# looked up before the value is accepted
+if [[ -n "$PI_HOST" && ! "$PI_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]]; then
   echo "invalid POKOIN_MEDIA_FALLBACK_HOST" >&2
   exit 2
 fi

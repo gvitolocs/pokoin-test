@@ -34,9 +34,10 @@ function loadAliases() {
 const LOCAL_OBJECTS = process.env.POKOIN_OBJECTS || '';
 const PI_OBJECTS = process.env.POKOIN_MEDIA_FALLBACK_OBJECTS || '';
 const PI_HOST = process.env.POKOIN_MEDIA_FALLBACK_HOST || '';
-// the host reaches ssh as one argument, so it must not start with a dash nor hold a space or
-// another shell character; nothing is looked up before it is accepted
-if (PI_HOST && !/^[A-Za-z0-9][A-Za-z0-9._@:-]*$/.test(PI_HOST)) {
+// the host reaches ssh as one argument, so it must not start with a dash nor hold a space, a colon or
+// another shell character; a host with a port on it is not one ssh can use, and nothing is looked up
+// before the value is accepted
+if (PI_HOST && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(PI_HOST)) {
   console.error('invalid POKOIN_MEDIA_FALLBACK_HOST');
   process.exit(2);
 }

@@ -547,13 +547,35 @@ fi
 fb_keys b.png
 fb_store
 fb_manifest b.png "/store/b.png" -
-for bad_value in '-oProxyCommand=x' 'a b' 'x;id'; do
+for bad_value in '-oProxyCommand=x' 'a b' 'x;id' 'host:22'; do
   run_fb s3 POKOIN_MEDIA_FALLBACK_HOST="$bad_value"
   if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
     && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
     ok "s3 (c): value [$bad_value]: exit 2, only that line on stderr, no ssh, scp or wrangler call"
   else
     bad "s3: value [$bad_value] status=$STATUS err=[$ERR] ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS"
+  fi
+done
+
+# s3n. a value that runs over two lines: the check is anchored at both ends, and the second line of
+#      a host is a command the run would hand to ssh. The value is named by its shape, not printed.
+run_fb s3n POKOIN_MEDIA_FALLBACK_HOST=$'host\nx'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
+  ok "s3n (item 5): a host value with an embedded newline: exit 2, only that line on stderr, no ssh, scp or wrangler call"
+else
+  bad "s3n: status=$STATUS err=[$ERR] ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS"
+fi
+
+# s3t. the two shapes a plain host token is there to let through: a user with an at-sign, and a host
+#      with its dots. Each reaches ssh as exactly one argument, after the --.
+for good_value in 'user@host' 'host.example.invalid'; do
+  run_fb s3t POKOIN_MEDIA_FALLBACK_HOST="$good_value"
+  if [[ "$STATUS" -eq 0 ]] && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$ERR" != *"invalid"* ]] \
+    && grep -Fxq -- '--' "$SSH_LOG" && grep -Fxq -- "$good_value" "$SSH_LOG"; then
+    ok "s3t (item 5): the value [$good_value] is accepted and reaches ssh as one argument"
+  else
+    bad "s3t: value [$good_value] status=$STATUS ssh=$SSH_CALLS ssh_log=[$(tr '\n' '|' < "$SSH_LOG" 2>/dev/null)] err=[$ERR]"
   fi
 done
 run_fb s3e POKOIN_MEDIA_FALLBACK_HOST=
@@ -820,6 +842,13 @@ for pattern_file in "$SRC" "$HERE/media-manifest.mjs"; do
     ok "s10 (E): the host pattern of $(basename "$pattern_file") is one line of plain ASCII with an ASCII @"
   else
     bad "s10: the host pattern of $pattern_file is missing, ambiguous or not plain ASCII"
+  fi
+  # the colon is not one of the characters: it is how a URL splits a port off a host, and ssh and scp
+  # take such a value for a host they cannot reach, so the pattern holds no colon at all
+  if grep -F 'A-Za-z0-9' "$pattern_file" | grep -q ':'; then
+    bad "s10b: the host pattern of $(basename "$pattern_file") still lets a colon through"
+  else
+    ok "s10b (item 5): the host pattern of $(basename "$pattern_file") holds no colon"
   fi
 done
 fb_keys b.png
