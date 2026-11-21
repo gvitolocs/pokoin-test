@@ -361,7 +361,8 @@ echo "Done. Uploaded keys recorded in ${DONE}"
 # xargs run that stopped before the end of the list, and for the two steps that read or rewrite what
 # the counts are made of; 3 for a key the manifest gives a source; 5 for the HEAD sample that did not
 # come back; and 0 when none of these applies, which is the status of an if that took no branch. The
-# 1 of a preflight check and the 2 of an unusable fallback host are long gone by here.
+# 1 of a preflight check and the 2 of an unusable fallback host or of an object directory the run was
+# not given are long gone by here.
 if (( FAILED > 0 || NOTRECORDED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 \
       || MANIFEST_ROWS_STATUS != 0 || REWRITE_STATUS != 0 )); then
   exit 4
