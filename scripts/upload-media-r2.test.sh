@@ -425,9 +425,13 @@ fb_keys() {
   for k in "$@"; do printf '%s\n' "$k" >> "$FB_KEYS"; done
 }
 fb_store() {
-  rm -f "$TMP/objects2"/*
+  rm -rf -- "$TMP/objects2"
+  mkdir -p -- "$TMP/objects2"
   local k
-  for k in "$@"; do printf x > "$TMP/objects2/$k"; done
+  for k in "$@"; do
+    mkdir -p -- "$TMP/objects2/$(dirname -- "$k")"
+    printf x > "$TMP/objects2/$k"
+  done
 }
 
 # fb_manifest <key> <object or -> <aliasOf or -> ...: the rows of the fixture manifest, three
@@ -1573,6 +1577,13 @@ key_case 'a key above the store' 1 '-' 'a.png'
 key_case 'a key in a folder of the store' 1 '-' 'figure-masks-whole/v1.webp'
 key_case 'a key whose name starts with a dash' 1 '-' '-c.png'
 key_case 'a key with single dots in it' 1 '-' 'a.b.c.png'
+# item A: two dots inside a name are part of the name. A parent step is one component of its own, and
+# only such a component is a step above the store.
+key_case 'a key whose name holds two dots' 1 '-' 'a..b.png'
+key_case 'a key whose name holds two dots and a folder' 1 '-' 'x/a..b.png'
+key_case 'a key between two dots' 1 '-' 'v1..v2.webp'
+key_case 'a key that is only two dots' 0 'invalid key (skipped): ..' '..'
+key_case 'a key that ends in a parent step' 0 'invalid key (skipped): x/..' 'x/..'
 key_case 'a key that reaches above the store' 0 'invalid key (skipped): ../x.png' '../x.png'
 key_case 'a key with a parent step inside it' 0 'invalid key (skipped): a/../b.png' 'a/../b.png'
 key_case 'a key that is an absolute path' 0 'invalid key (skipped): /etc/x' '/etc/x'
@@ -1592,6 +1603,23 @@ HARNESS
     printf '%s\n' "$kout"
     bad "s35: the extracted key validator did not hold the contract (rc=$kfail)"
   fi
+fi
+
+# s36 (item A). two dots inside a name are part of the name: three keys of that shape, one of them in
+#               a folder of the store, go up like any other key. The fallback host is set so that a
+#               refusal would also show as a store lookup and an ssh call the run must not make.
+fb_keys 'a..b.png' 'v1..v2.webp' 'x/a..b.png' good.png
+fb_store 'a..b.png' 'v1..v2.webp' 'x/a..b.png' good.png
+fb_manifest 'a..b.png' "/store/a..b.png" - 'v1..v2.webp' "/store/v1..v2.webp" - \
+  'x/a..b.png' "/store/x/a..b.png" - good.png "/store/good.png" -
+run_fb s36 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 4"* ]] \
+  && [[ "$WR_CALLS" -eq 4 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] \
+  && [[ "$ERR" != *"invalid key"* ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$(done_list | sort | tr '\n' '|')" == "a..b.png|good.png|v1..v2.webp|x/a..b.png|" ]]; then
+  ok "s36 (item A): [a..b.png], [v1..v2.webp] and [x/a..b.png] are names and not parent steps: 4 keys, 4 uploads, exit 0"
+else
+  bad "s36: status=$STATUS keys=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS ssh=$SSH_CALLS done=[$(done_list | tr '\n' '|')] err=[$ERR]"
 fi
 
 # s12. the repository-wide check runs as a step of this suite, so its failure fails the suite
