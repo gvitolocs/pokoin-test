@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Upload media-manifest.json objects to R2 from the machine that holds the media objects (local object store + pi-home fallback).
+# Upload media-manifest.json objects to R2 from the machine that holds the media objects (local object store + optional fallback host).
 # Sources ~/.config/pokoin/cloudflare.env when it is readable and LANE_WORKER is unset (its values replace exported ones), then restores the set -o and shopt options; needs ~/.bun/bin/wrangler.
 # Do not run in CI without intent — this pushes to pokoin-test-media.
 #
@@ -38,7 +38,7 @@ BUCKET="pokoin-test-media"
 PUBLIC_BASE="https://test-media.pokoin.com"
 OBJECTS="${POKOIN_OBJECTS:-/home/nez/data/pokoin-leftovers/objects}"
 PI_OBJECTS="/srv/pokoin/card-images/objects"
-PI_HOST="pi-home"
+PI_HOST="${POKOIN_MEDIA_FALLBACK_HOST:-}"
 WRANGLER="${WRANGLER:-$HOME/.bun/bin/wrangler}"
 PARALLEL="${PARALLEL:-8}"
 FORCE="${FORCE:-0}"
@@ -108,7 +108,7 @@ resolve_file() {
     printf '%s' "$path"
     return 0
   fi
-  if ssh -o BatchMode=yes -o ConnectTimeout=10 "${PI_HOST}" "test -f ${PI_OBJECTS}/${key}" 2>/dev/null; then
+  if [[ -n "$PI_HOST" ]] && ssh -o BatchMode=yes -o ConnectTimeout=10 "${PI_HOST}" "test -f ${PI_OBJECTS}/${key}" 2>/dev/null; then
     local tmp
     tmp="$(mktemp -p "${TMPDIR:-/tmp}" "$(basename "$key").XXXXXX")"
     scp -q "${PI_HOST}:${PI_OBJECTS}/${key}" "$tmp"
