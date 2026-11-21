@@ -2,8 +2,9 @@
 # Tests for scripts/upload-media-r2.sh: credential loading and preflight, the object directory it
 # has to be told about, the fallback host, the key that names a path instead of a file of the store,
 # the keys skipped for want of a source, the upload whose wrangler call fails, the keys a run failed
-# to account for, the key that is listed twice and the one it cannot record in the done list; and
-# scripts/no-host-names.test.sh and scripts/media-manifest-guard.test.sh as two of its own steps.
+# to account for, the key that is listed twice or twice with blanks in front of it and the one it
+# cannot record in the done list; and scripts/no-host-names.test.sh and
+# scripts/media-manifest-guard.test.sh as two of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
 set -euo pipefail
@@ -1265,6 +1266,39 @@ if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 2"* ]] \
   ok "s26 (A): a manifest that lists one key twice is 2 keys to process, and the key goes up once"
 else
   bad "s26: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS dup=$dup_uploads err=[$ERR]"
+fi
+
+# s26b (item 6). two keys that differ only by the blanks in front of them: the dedupe of the string
+#                sees two, the workers see one -- xargs -I takes the blanks off before it hands the
+#                argument over -- so the run handed two keys out, got one record back and ended 4 with
+#                an unaccounted key for a list that held nothing wrong. The blanks come off the keys
+#                before anything else uses them, which makes the two the same key to both ends.
+fb_keys ' a.png' 'a.png'
+fb_store a.png
+fb_manifest a.png "/store/a.png" -
+run_fb s26b PARALLEL=1
+a_uploads="$(wrangler_calls_for a.png)"
+if [[ "$STATUS" -eq 0 ]] && [[ "$OUT" == *"Keys to process: 1"* ]] \
+  && [[ "$a_uploads" -eq 1 ]] && [[ "$WR_CALLS" -eq 1 ]] && [[ "$ERR" != *"unaccounted"* ]] \
+  && [[ "$(done_list)" == "a.png" ]]; then
+  ok "s26b (F): [ a.png] and [a.png] in one keys file are one key: 1 to process, one upload, exit 0"
+else
+  bad "s26b: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS uploads=$a_uploads done=[$(done_list)] err=[$ERR]"
+fi
+
+# s26c (item 6). the strip leaves the keys that are not blanks alone: a name with a blank inside it is
+#                still the name it was, and a key that starts with a dash is still data
+fb_keys ' k1.png' 'k2 p x.png' '-c.png'
+fb_store 'k2 p x.png' '-c.png'
+fb_manifest 'k2 p x.png' "/store/k2 p x.png" - '-c.png' "/store/-c.png" -
+run_fb s26c PARALLEL=1
+if [[ "$STATUS" -eq 3 ]] && [[ "$OUT" == *"Keys to process: 3"* ]] \
+  && [[ "$WR_CALLS" -eq 2 ]] && grep -qF -- 'pokoin-test-media/k2 p x.png ' "$CALLS2" \
+  && grep -qF -- 'pokoin-test-media/-c.png ' "$CALLS2" \
+  && [[ "$ERR" == *"skip (no source): k1.png"* ]] && [[ "$ERR" != *"skip (no source):  k1.png"* ]]; then
+  ok "s26c (F): the blanks that come off are the ones in front: the name holds its own, the key holds its dash"
+else
+  bad "s26c: status=$STATUS first_out=[$(printf '%s\n' "$OUT" | head -1)] wrangler=$WR_CALLS calls=[$(tr '\n' '|' < "$CALLS2" 2>/dev/null)] err=[$ERR]"
 fi
 
 # s27 (B). the done list will not take a row, because it is not writable: every key still goes up,

@@ -15,7 +15,8 @@
 #     relative to: a host with no directory behind it ends the run 2, and with no host the directory
 #     is not asked for. The tree names neither of them for a run that was not told.
 # A key the file or the manifest names twice is uploaded once: the list is deduped before the keys go
-# out, so what the run handed out and what it got reports about are the same set.
+# out, so what the run handed out and what it got reports about are the same set. The blanks in front
+# of a key come off before that, so a key and the same key with spaces in front of it are one key.
 # A key that is not one name under the object directory -- it holds "..", starts with "/", or carries
 # a control character -- is refused where it stands, never looked up, and counted as a failed key.
 set -euo pipefail
@@ -126,8 +127,11 @@ fi
 # themselves, so a key named twice in the file, or held as two rows of the manifest, would be handed
 # out twice and accounted once. The list keeps one row per key here, the first row it came in on, in
 # the order of the list; an empty list stays empty.
+# The blanks in front of a key come off before that, and before anything else uses the list: they are
+# not part of the name, and the workers take them off on their own, so two rows that differ only by
+# them are one key to the store and to the accounting.
 if (( ${#KEYS[@]} > 0 )); then
-  mapfile -t KEYS < <(printf '%s\n' "${KEYS[@]}" | awk '!seen[$0]++')
+  mapfile -t KEYS < <(printf '%s\n' "${KEYS[@]}" | awk '{ sub(/^[ \t]+/, ""); } !seen[$0]++')
 fi
 
 echo "Keys to process: ${#KEYS[@]}"
