@@ -38,6 +38,13 @@ fail=0
 ok() { echo "ok: $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
 
+# the script under test is executable, so ./scripts/upload-media-r2.sh runs after a clone
+if [[ -x "$SRC" ]]; then
+  ok "o: the script under test is executable"
+else
+  bad "o: the script under test is not executable: $SRC"
+fi
+
 # run_case <name> <HOME dir> [extra env assignments...]; sets STATUS, ERR
 run_case() {
   shift; local home="$1"; shift
@@ -186,6 +193,72 @@ if [[ "$STATUS" -eq 0 ]] && grep -q "^token-set value-from-file " "$CALLS"; then
   ok "j: values from the credentials file replace exported ones"
 else
   bad "j: status=$STATUS calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# m. the loader block restores every set -o and shopt option. The block is extracted from the script
+#    and run in a harness (options are not inherited by child processes, so the end-to-end cases
+#    cannot see them). The harness compares the options and $- before and after and prints nothing.
+sed -n '/loader: begin/,/loader: end/p' "$SRC" > "$TMP/loader-block.sh"
+# a moved or deleted marker, or a block without its restore line, stops the run: no cell below may report ok
+if [[ ! -s "$TMP/loader-block.sh" ]] || ! grep -q 'eval "\$' "$TMP/loader-block.sh"; then
+  echo "FAIL: m: the loader block between the markers is empty or has no restore line"
+  echo "FAILED"
+  exit 1
+fi
+# The harness exits 11 when the options differ, 12 when the file was not really sourced (the dummy token is checked
+# after tracing is turned off, so no trace line carries the value), 13 when the snapshot variable is left.
+# shellcheck disable=SC2016
+HARNESS='eval "$2"
+before="$(set +o; shopt -p) $-"
+. "$1"
+after="$(set +o; shopt -p) $-"
+[ "$before" = "$after" ] || exit 11
+{ set +x +v; } 2>/dev/null
+[ "${CLOUDFLARE_API_TOKEN:-}" = "$DUMMY_TOKEN" ] || exit 12
+[ -z "${_cf_env_snapshot+x}" ] || exit 13'
+H="$(mk_home home-m)"
+m_starts=("" "set -e" "set -eu" "set -euo pipefail" "shopt -s extglob" "set -a" "set -f; shopt -s nullglob" "set -x" "set -v")
+m_files=("set +e" "set -x" "set -v" "shopt -s nullglob extglob" "set -o pipefail" "set +o pipefail" "set +u" "set -f" "set -euo pipefail" "shopt -u extglob" "TAIL-FAILS")
+for start in "${m_starts[@]}"; do
+  for line in "${m_files[@]}"; do
+    if [[ "$line" == "TAIL-FAILS" ]]; then
+      # tracing with a PS4 that runs a command, and the file's last command fails
+      write_creds "$H" "PS4='\$(echo SECRET-FROM-PS4)+ '" "set -x"
+      printf 'false\n' >> "$H/.config/pokoin/cloudflare.env"
+    else
+      write_creds "$H" "$line"
+    fi
+    set +e
+    mout="$(env -i PATH="/usr/bin:/bin" HOME="$H" DUMMY_TOKEN="$DUMMY_TOKEN" bash -c "$HARNESS" _ "$TMP/loader-block.sh" "$start" 2>&1)"
+    mrc=$?
+    set -e
+    # a caller that starts with tracing or verbose has bash print its own lines, so for those starts the output must
+    # only be free of credential values (a PS4 the file sets also applies to the caller's own trace lines); for every
+    # other start it must be empty
+    if [[ "$start" == "set -x" || "$start" == "set -v" ]]; then
+      mclean=1
+      if [[ "$mout" == *"$DUMMY_TOKEN"* || "$mout" == *"$DUMMY_ACCOUNT"* ]]; then mclean=0; fi
+    else
+      mclean=0
+      if [[ -z "$mout" ]]; then mclean=1; fi
+    fi
+    if [[ "$mrc" -eq 0 && "$mclean" -eq 1 ]]; then
+      ok "m: restored after [$line] from start [$start]"
+    else
+      bad "m: not restored after [$line] from start [$start] rc=$mrc (11 options, 12 not sourced, 13 variable left) out=[${mout:0:200}]"
+    fi
+  done
+done
+
+# n. umask and the working directory are not restored (documented limits)
+H="$(mk_home home-n)"
+write_creds "$H" "umask 077" "cd /"
+# shellcheck disable=SC2016
+nout="$(env -i PATH="/usr/bin:/bin" HOME="$H" bash -c 'umask 022; cd "$2"; . "$1"; echo "$(umask) $PWD"' _ "$TMP/loader-block.sh" "$TMP")"
+if [[ "$nout" == "0077 /" ]]; then
+  ok "n: umask and working directory set by the file are not restored"
+else
+  bad "n: out=[$nout]"
 fi
 
 if [[ -e "$TMP/forbidden.calls" ]]; then
