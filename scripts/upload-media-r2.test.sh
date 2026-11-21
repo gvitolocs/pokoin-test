@@ -623,6 +623,31 @@ else
   bad "s0d: status=$STATUS err=[$ERR] want=[$want_creds_line]"
 fi
 
+# s0e/s0f. set, but not a directory: a name that is not there and a regular file, the two shapes a
+#          typo makes. The store cannot be read out of either, so the run says so and ends 2 before
+#          it looks at a key, at the credentials or at the done list.
+want_not_a_dir_line="POKOIN_OBJECTS is not a directory"
+for not_a_dir in "$TMP/no-such-dir" "$TMP/objects/a.png"; do
+  run_objects s0e "$not_a_dir"
+  if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_not_a_dir_line" ]] \
+    && [[ ! -e "$CALLS" ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]] \
+    && [[ ! -e "$TMP/root/.media-upload.done" ]]; then
+    ok "s0e/s0f: POKOIN_OBJECTS=[$not_a_dir]: exit 2, only [$want_not_a_dir_line], no wrangler, ssh or scp call, no done list touched"
+  else
+    bad "s0e/s0f: POKOIN_OBJECTS=[$not_a_dir] status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none) forbidden=$((FORB_NOW - FORB_BEFORE)) done=$([[ -e "$TMP/root/.media-upload.done" ]] && echo written || echo untouched)"
+  fi
+done
+
+# s0g. an unusable fallback host beside a store that is not a directory: the host is still validated
+#      first, so the check of the directory holds the place the unset one held
+run_objects s0g "$TMP/no-such-dir" POKOIN_MEDIA_FALLBACK_HOST='-oProxyCommand=x'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
+  && [[ ! -e "$CALLS" ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0g: the fallback host is validated before the object directory is looked at"
+else
+  bad "s0g: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
 # s4. one key resolvable and one not: the resolvable one is still uploaded, the run exits 3
 fb_keys a.png b.png
 fb_store a.png

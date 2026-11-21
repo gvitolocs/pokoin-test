@@ -5,7 +5,8 @@
 #
 # Required:
 #   POKOIN_OBJECTS=path -- the directory that holds the media objects; the manifest gives every key
-#     relative to it. Unset or empty, the script says so and ends 2 before it looks at anything else.
+#     relative to it. Unset or empty, the script says so and ends 2 before it looks at anything else;
+#     set but not a directory, it says that instead, in the same place.
 # Optional:
 #   KEYS_FILE=path   — upload only keys listed in the file (one per line), ignoring the done-list unless FORCE=1
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
@@ -56,6 +57,12 @@ fi
 # told does not look around for one
 if [[ -z "$OBJECTS" ]]; then
   echo "set POKOIN_OBJECTS to the directory that holds the media objects" >&2
+  exit 2
+fi
+# a name that is not there, or that holds a file, cannot give up any object: read as an empty store
+# it would come back as every key of the list missing from it
+if [[ ! -d "$OBJECTS" ]]; then
+  echo "POKOIN_OBJECTS is not a directory" >&2
   exit 2
 fi
 WRANGLER="${WRANGLER:-$HOME/.bun/bin/wrangler}"
@@ -381,7 +388,8 @@ echo "Done. Uploaded keys recorded in ${DONE}"
 # and for the two steps that read or rewrite what the counts are made of; 3 for a key the manifest
 # gives a source; 5 for the HEAD sample that did not come back; and 0 when none of these applies,
 # which is the status of an if that took no branch. The 1 of a preflight check and the 2 of an
-# unusable fallback host or of an object directory the run was not given are long gone by here.
+# unusable fallback host, of an object directory the run was not given or that it was given as
+# something other than a directory, are long gone by here.
 if (( FAILED > 0 || NOTRECORDED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 \
       || MANIFEST_ROWS_STATUS != 0 || REWRITE_STATUS != 0 )); then
   exit 4
