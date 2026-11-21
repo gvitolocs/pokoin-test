@@ -8,7 +8,10 @@
  * relative to it and never the directory itself. Optional: POKOIN_MEDIA_FALLBACK_HOST, the ssh host
  * that holds objects missing from the local store, and with it POKOIN_MEDIA_FALLBACK_OBJECTS, the
  * directory on that host the keys are relative to. A host with no remote directory behind it ends the
- * run 2; with no host neither is asked for, and the tree names neither of them.
+ * run 2; with no host neither is asked for, and the tree names neither of them. A remote directory that
+ * is not an absolute path of plain characters, with no step out of itself, ends the run 2 too, before a
+ * catalog is fetched: the keys go over under it as one quoted word, and a name of that shape is a
+ * mistyped path rather than a place.
  */
 
 import { createHash } from 'node:crypto';
@@ -48,6 +51,21 @@ if (PI_HOST && !PI_OBJECTS) {
   console.error('set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects');
   process.exit(2);
 }
+// the shape of that directory is held to what a name is made of, the way the host is: absolute, of
+// these characters only, no step out of itself and nothing after its name. It stands in front of every
+// key the run asks the other machine for, and it goes into a command line the shell there reads, so a
+// value of any other shape ends the run before a catalog is fetched. A run with no host set ends the
+// same way: the name it would reach for is the one it was given either way, and a directory holding a
+// space, a quote or a star is a mistyped path rather than a place.
+if (PI_OBJECTS && !(
+  /^[A-Za-z0-9._/@+-]+$/.test(PI_OBJECTS)
+  && PI_OBJECTS.startsWith('/')
+  && !PI_OBJECTS.includes('\n')
+  && !/(^|\/)\.\.(\/|$)/.test(PI_OBJECTS)
+)) {
+  console.error('invalid POKOIN_MEDIA_FALLBACK_OBJECTS');
+  process.exit(2);
+}
 // the store is where the operator keeps it, and the tree holds no guess at it: a run that was not
 // told would hash the files of whatever directory its name happens to match
 if (!LOCAL_OBJECTS) {
@@ -82,7 +100,9 @@ async function sha256File(path) {
 
 function piKeysPresent(keys) {
   if (!PI_HOST || !keys.length) return Promise.resolve(new Set());
-  const script = `cd ${PI_OBJECTS} && while IFS= read -r k; do test -f "$k" && printf '%s\\n' "$k"; done`;
+  // the directory is quoted on the way in, though the value was held to plain characters above: the
+  // command is one line the shell on that machine reads, and a name is one word there or it is nothing
+  const script = `cd '${PI_OBJECTS}' && while IFS= read -r k; do test -f "$k" && printf '%s\\n' "$k"; done`;
   return new Promise((resolve) => {
     const child = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--', PI_HOST, script], {
       stdio: ['pipe', 'pipe', 'pipe'],

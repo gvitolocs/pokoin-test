@@ -536,6 +536,7 @@ done
 if ! holds "$UPLOAD" 'remote_word'; then
   bad "g16: the upload script builds no quoted remote word at all"
 else
+  # shellcheck disable=SC2016
   quote_use="$(first_line "$UPLOAD" 'test -f $(remote_word')"
   quote_def="$(first_line "$UPLOAD" 'remote_word() {')"
   if [[ "$quote_def" == "0" || "$quote_use" == "0" ]]; then

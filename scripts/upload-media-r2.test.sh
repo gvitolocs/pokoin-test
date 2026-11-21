@@ -535,7 +535,7 @@ BatchMode=yes
 ConnectTimeout=10
 --
 $FB_HOST
-test -f $REMOTE_OBJECTS/b.png
+test -f '$REMOTE_OBJECTS/b.png'
 EXPECT
 )"
 got_ssh=""
@@ -892,7 +892,10 @@ fi
 # s10. the host pattern is plain ASCII, its at-sign is the ASCII one, and user@host is accepted
 pattern_ascii() {
   local file="$1" line n
-  line="$(grep -F 'A-Za-z0-9' "$file")" || return 1
+  # the host pattern is the line that spells a host as a letter and then the characters of a name. The
+  # remote directory has a class of its own since item D, and it is not what this case looks at, so the
+  # host is found by the two classes standing next to each other
+  line="$(grep -F '[A-Za-z0-9][A-Za-z0-9._@-]' "$file")" || return 1
   n="$(printf '%s\n' "$line" | grep -c .)"
   if [[ "$n" -ne 1 ]]; then return 1; fi
   if LC_ALL=C grep -q '[^ -~]' <<<"$line"; then return 1; fi
@@ -906,7 +909,7 @@ for pattern_file in "$SRC" "$HERE/media-manifest.mjs"; do
   fi
   # the colon is not one of the characters: it is how a URL splits a port off a host, and ssh and scp
   # take such a value for a host they cannot reach, so the pattern holds no colon at all
-  if grep -F 'A-Za-z0-9' "$pattern_file" | grep -q ':'; then
+  if grep -F '[A-Za-z0-9][A-Za-z0-9._@-]' "$pattern_file" | grep -q ':'; then
     bad "s10b: the host pattern of $(basename "$pattern_file") still lets a colon through"
   else
     ok "s10b (item 5): the host pattern of $(basename "$pattern_file") holds no colon"
@@ -1812,6 +1815,7 @@ fi
 #              plain characters, no parent step in it and nothing after its name, because it is put in
 #              front of every key the run asks the host for.
 want_invalid_objects_line="invalid POKOIN_MEDIA_FALLBACK_OBJECTS"
+# shellcheck disable=SC2016
 for bad_dir in '/remote obj' "/remote/obj's" '/remote/$(x)' '/remote/`x`' '/remote/*' '/remote/a?b' \
   '/remote/;id' '/remote/a|b' '/remote/../objects' '/remote/objects/..' '..' 'remote/objects' \
   '/remote/objects ' '/remote/objects/a b'; do
@@ -1823,6 +1827,18 @@ for bad_dir in '/remote obj' "/remote/obj's" '/remote/$(x)' '/remote/`x`' '/remo
     bad "s3o: value=[$bad_dir] status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS err=[$ERR]"
   fi
 done
+
+# s3n (item D). a name with a newline at its end is the one shape an anchored pattern lets through: bash
+# reads the $ as standing before a newline at the end of the string, so what reaches the command is longer
+# than the name the value spells. The newline is put on by hand, because a command substitution takes the
+# trailing ones off and would hand over the plain name.
+run_fb s3n POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"$'\n'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]]; then
+  ok "s3n (item D): a remote directory that ends with a newline is refused, though the pattern holds no newline"
+else
+  bad "s3n: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS err=[$(printf %s "$ERR" | tr '\n' '|')]"
+fi
 
 # s3p (item D). the shapes that are a directory of plain characters go through and are used as given
 for good_dir in '/remote/objects' '/remote/obj-1' '/remote/obj_2' '/remote/a@b' '/remote/c+d' '/remote/v1.2'; do

@@ -14,6 +14,12 @@
 #     With it set, POKOIN_MEDIA_FALLBACK_OBJECTS=path is the directory on that host the keys are
 #     relative to: a host with no directory behind it ends the run 2, and with no host the directory
 #     is not asked for. The tree names neither of them for a run that was not told.
+#     That directory is held to what a name is made of -- absolute, of letters, digits and . _ / @ + -,
+#     with no ".." step in it and nothing after its name -- and a value of any other shape ends the run 2
+#     saying so, after the host check and before the store is looked at or the host is reached. A run with
+#     no host set is refused the same way: a directory of that shape is a mistyped path, not a place.
+# The path the host is asked about goes over as one quoted word, so a key that holds a blank, a star or a
+# dollar sign cannot become two names, a list of files or a command in the shell that reads it there.
 # A key the file or the manifest names twice is uploaded once: the list is deduped before the keys go
 # out, so what the run handed out and what it got reports about are the same set. The blanks in front
 # of a key come off before that, so a key and the same key with spaces in front of it are one key, and
@@ -68,6 +74,22 @@ fi
 # layout of the machine it reaches
 if [[ -n "$PI_HOST" && -z "$PI_OBJECTS" ]]; then
   echo "set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects" >&2
+  exit 2
+fi
+# the shape of that directory is held to what a name is made of, the way the host is: absolute, of these
+# characters only, no step out of itself and nothing after its name. It stands in front of every key the
+# run asks the host for, and it goes into a command line the shell on that machine reads, so a value of
+# any other shape is refused before that line is built. A run with no host set is refused the same way:
+# the name it would reach for is the one it was given either way, and a directory holding a space, a
+# quote or a star is a mistyped path rather than a place. The pattern is anchored, and bash reads an
+# anchor as standing before a newline at the end of a string, so a control character is looked for on its
+# own -- the newline that hides behind the anchor above all.
+if [[ -n "$PI_OBJECTS" ]] \
+  && { [[ "$PI_OBJECTS" != /* ]] || [[ ! "$PI_OBJECTS" =~ ^[A-Za-z0-9._/@+-]+$ ]] \
+       || [[ "$PI_OBJECTS" == *[[:cntrl:]]* ]] \
+       || [[ "$PI_OBJECTS" == .. || "$PI_OBJECTS" == ../* || "$PI_OBJECTS" == */.. \
+            || "$PI_OBJECTS" == */[.][.]/* ]]; }; then
+  echo "invalid POKOIN_MEDIA_FALLBACK_OBJECTS" >&2
   exit 2
 fi
 # the store is where the operator keeps it, and the tree holds no guess at it: the run that was not
@@ -188,6 +210,16 @@ key_is_bad() {
   return 1
 }
 
+# the one word a shell on the other machine has to read as this path: the name between single quotes, and
+# every quote that belongs to the name written as closing-quote, quoted-quote, opening-quote. bash's own
+# %q is not used, because the shell behind ssh is the login shell of a machine this run knows nothing
+# about, and the single-quoted form is the one every shell reads the same way; inside those quotes nothing
+# is a substitution, a command or a list of files, and only a quote can end them.
+remote_word() {
+  local path="$1"
+  printf "'%s'" "${path//\'/\'\\\'\'}"
+}
+
 resolve_file() {
   local key="$1"
   local path="${OBJECTS}/${key}"
@@ -195,9 +227,16 @@ resolve_file() {
     printf '%s' "$path"
     return 0
   fi
-  if [[ -n "$PI_HOST" ]] && ssh -o BatchMode=yes -o ConnectTimeout=10 -- "${PI_HOST}" "test -f ${PI_OBJECTS}/${key}" 2>/dev/null; then
+  if [[ -n "$PI_HOST" ]] \
+    && ssh -o BatchMode=yes -o ConnectTimeout=10 -- "${PI_HOST}" \
+      "test -f $(remote_word "${PI_OBJECTS}/${key}")" 2>/dev/null; then
     local tmp
     tmp="$(mktemp -p "${TMPDIR:-/tmp}" "$(basename "$key").XXXXXX")"
+    # the fetch is not given the quotes the test above is: scp in its default mode hands the remote name to
+    # an SFTP server, where no shell reads it and a quote would become part of the name it looks up. The
+    # legacy transport (-O) does let a far shell read it, and a name holding a blank is not one that
+    # transport takes; nothing here asks for it. The directory of the path is held to plain characters
+    # before the host is reached, so only the name of the file can hold a blank at all.
     scp -q -- "${PI_HOST}:${PI_OBJECTS}/${key}" "$tmp"
     printf '%s' "$tmp"
     return 0
@@ -289,7 +328,7 @@ upload_one() {
 }
 
 export ALIASES BUCKET DONE OBJECTS PI_HOST PI_OBJECTS WRANGLER FORCE
-export -f resolve_file upload_one alias_for content_type_for record_result key_is_bad
+export -f resolve_file upload_one alias_for content_type_for record_result key_is_bad remote_word
 
 echo "Uploading with $WRANGLER (parallel ${PARALLEL})…"
 # the status of xargs is captured rather than left to errexit, because a child that exits 255 or dies
@@ -433,8 +472,8 @@ echo "Done. Uploaded keys recorded in ${DONE}"
 # gives a source; 5 for the HEAD sample that did not come back; and 0 when none of these applies,
 # which is the status of an if that took no branch. The 1 of a preflight check ended the run before
 # any of this, and so did the 2 of an unusable fallback host, of a host with no remote directory
-# behind it, or of an object directory the run was not given or was given as something other than a
-# directory.
+# behind it, of a remote directory that is not a plain absolute path, or of an object directory the
+# run was not given or was given as something other than a directory.
 if (( FAILED > 0 || NOTRECORDED > 0 || UNACCOUNTED > 0 || XARGS_STATUS != 0 \
       || MANIFEST_ROWS_STATUS != 0 || REWRITE_STATUS != 0 )); then
   exit 4
