@@ -65,6 +65,13 @@ fi
 
 touch "$DONE"
 
+# the keys with no source are found by the xargs children, which share no variable with this shell,
+# so each of them appends to a file in a private temporary directory
+WORK="$(mktemp -d -p "${TMPDIR:-/tmp}" "upload-media-r2.XXXXXX")"
+trap 'rm -rf -- "${WORK}"' EXIT
+SKIP_LIST="${WORK}/no-source"
+export SKIP_LIST
+
 if [[ -n "${KEYS_FILE:-}" ]]; then
   mapfile -t KEYS < <(grep -v '^[[:space:]]*$' "$KEYS_FILE" | grep -v '^#')
 else
@@ -132,10 +139,12 @@ upload_one() {
       source_key="$alias"
       if ! file="$(resolve_file "$source_key")"; then
         echo "skip (no source or alias): $key (alias $alias)" >&2
+        printf '%s\n' "$key" >> "$SKIP_LIST"
         return 0
       fi
     else
       echo "skip (no source): $key" >&2
+      printf '%s\n' "$key" >> "$SKIP_LIST"
       return 0
     fi
   fi
@@ -182,3 +191,13 @@ const pick = keys.filter((_, i) => i % Math.max(1, Math.floor(keys.length / ${SA
 "
 
 echo "Done. Uploaded keys recorded in ${DONE}"
+
+SKIPPED=0
+if [[ -s "$SKIP_LIST" ]]; then
+  mapfile -t SKIPPED_KEYS < "$SKIP_LIST"
+  SKIPPED=${#SKIPPED_KEYS[@]}
+fi
+if (( SKIPPED > 0 )); then
+  echo "$SKIPPED keys skipped: no source" >&2
+  exit 3
+fi
