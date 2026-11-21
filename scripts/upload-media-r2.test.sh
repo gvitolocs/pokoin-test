@@ -754,33 +754,50 @@ else
 fi
 
 # s17 (e). the HEAD sample at the end of the run fails after uploads that all worked: the count
-#          lines are already printed when it is attempted, and the run costs the sample's status
-fb_keys good.png absent.png
+#          lines are already printed when the sample is attempted, the run still says Done, and the
+#          status is the sample's own, 1, because nothing of a higher code happened. A key the
+#          committed manifest gives no object reports itself but costs nothing, which is what keeps
+#          this run above the 0 of a clean one.
+fb_keys good.png nothing.png
 fb_store good.png
-fb_manifest good.png "/store/good.png" - absent.png "/store/absent.png" -
+fb_manifest good.png "/store/good.png" - nothing.png - -
 fail_keys
 run_fb s17 FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
 err_last="$(printf '%s\n' "$ERR" | tail -1)"
-if [[ "$STATUS" -eq 1 ]] && [[ "$err_last" == "1 key skipped: no source" ]] \
-  && [[ "$ERR" == *"skip (no source): absent.png"* ]] && [[ "$ERR" != *"failed"* ]] \
-  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+if [[ "$STATUS" -eq 1 ]] \
+  && [[ "$err_last" == "$(line_for 1 'key has no object in the manifest' 'keys have no object in the manifest')" ]] \
+  && [[ "$ERR" == *"skip (no source): nothing.png"* ]] && [[ "$ERR" != *"failed"* ]] \
+  && [[ "$WR_CALLS" -eq 1 ]] && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
   ok "s17 (e): a failing sample fetch after good uploads: the count line precedes it, the run still says Done, exit 1"
 else
-  bad "s17: status=$STATUS err_last=[$err_last] out=[$OUT] err=[$ERR]"
+  bad "s17: status=$STATUS err_last=[$err_last] wrangler=$WR_CALLS out=[$OUT] err=[$ERR]"
 fi
 
-# the failed upload outranks the sample's own status
+# a real skip outranks the sample's status: 3, with its line already printed
+fb_keys good.png absent.png
+fb_store good.png
+fb_manifest good.png "/store/good.png" - absent.png "/store/absent.png" -
+run_fb s17b FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
+err_last="$(printf '%s\n' "$ERR" | tail -1)"
+if [[ "$STATUS" -eq 3 ]] && [[ "$err_last" == "1 key skipped: no source" ]] \
+  && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
+  ok "s17 (e): a failing sample fetch with a real skip: exit 3, the skip outranks the sample"
+else
+  bad "s17b: status=$STATUS err_last=[$err_last] out=[$OUT] err=[$ERR]"
+fi
+
+# a failed upload outranks both
 fb_keys good.png bad.png
 fb_store good.png bad.png
 fb_manifest good.png "/store/good.png" - bad.png "/store/bad.png" -
 fail_keys bad.png
-run_fb s17b FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
+run_fb s17c FAIL_KEYS="$FAIL_KEYS" SAMPLE_FAIL=1
 err_last="$(printf '%s\n' "$ERR" | tail -1)"
 if [[ "$STATUS" -eq 4 ]] && [[ "$err_last" == "1 key failed to upload" ]] \
   && grep -q 'pokoin-test-media/good\.png' "$CALLS2"; then
   ok "s17 (e): a failed upload with a failing sample fetch: exit 4, the failure line last"
 else
-  bad "s17b: status=$STATUS err_last=[$err_last] calls=[$(sort "$CALLS2" 2>/dev/null | tr '\n' '|')] err=[$ERR]"
+  bad "s17c: status=$STATUS err_last=[$err_last] calls=[$(sort "$CALLS2" 2>/dev/null | tr '\n' '|')] err=[$ERR]"
 fi
 fail_keys
 
