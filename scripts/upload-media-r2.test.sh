@@ -1828,16 +1828,16 @@ for bad_dir in '/remote obj' "/remote/obj's" '/remote/$(x)' '/remote/`x`' '/remo
   fi
 done
 
-# s3n (item D). a name with a newline at its end is the one shape an anchored pattern lets through: bash
+# s3s (item D). a name with a newline at its end is the one shape an anchored pattern lets through: bash
 # reads the $ as standing before a newline at the end of the string, so what reaches the command is longer
 # than the name the value spells. The newline is put on by hand, because a command substitution takes the
 # trailing ones off and would hand over the plain name.
-run_fb s3n POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"$'\n'
+run_fb s3s POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"$'\n'
 if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
   && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]]; then
-  ok "s3n (item D): a remote directory that ends with a newline is refused, though the pattern holds no newline"
+  ok "s3s (item D): a remote directory that ends with a newline is refused, though the pattern holds no newline"
 else
-  bad "s3n: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS err=[$(printf %s "$ERR" | tr '\n' '|')]"
+  bad "s3s: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS err=[$(printf %s "$ERR" | tr '\n' '|')]"
 fi
 
 # s3p (item D). the shapes that are a directory of plain characters go through and are used as given
