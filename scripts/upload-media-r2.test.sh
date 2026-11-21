@@ -188,6 +188,48 @@ else
   bad "j: status=$STATUS calls=$(cat "$CALLS" 2>/dev/null || echo none)"
 fi
 
+# m. the loader block restores every set -o and shopt option. The block is extracted from the script
+#    and run in a harness (options are not inherited by child processes, so the end-to-end cases
+#    cannot see them). The harness compares the options and $- before and after and prints nothing.
+sed -n '/loader: begin/,/loader: end/p' "$SRC" > "$TMP/loader-block.sh"
+if [[ ! -s "$TMP/loader-block.sh" ]]; then
+  bad "m: loader block markers not found"
+fi
+# shellcheck disable=SC2016
+HARNESS='eval "$2"
+before="$(set +o; shopt -p) $-"
+. "$1"
+after="$(set +o; shopt -p) $-"
+[ "$before" = "$after" ]'
+H="$(mk_home home-m)"
+m_starts=("" "set -e" "set -eu" "set -euo pipefail" "shopt -s extglob" "set -a" "set -f; shopt -s nullglob")
+m_files=("set +e" "set -x" "set -v" "shopt -s nullglob extglob" "set -o pipefail" "set +o pipefail" "set +u" "set -f" "set -euo pipefail" "shopt -u extglob")
+for start in "${m_starts[@]}"; do
+  for line in "${m_files[@]}"; do
+    write_creds "$H" "$line"
+    set +e
+    mout="$(env -i PATH="/usr/bin:/bin" HOME="$H" bash -c "$HARNESS" _ "$TMP/loader-block.sh" "$start" 2>&1)"
+    mrc=$?
+    set -e
+    if [[ "$mrc" -eq 0 && -z "$mout" ]]; then
+      ok "m: restored after [$line] from start [$start]"
+    else
+      bad "m: not restored after [$line] from start [$start] rc=$mrc out=[$mout]"
+    fi
+  done
+done
+
+# n. umask and the working directory are not restored (documented limits)
+H="$(mk_home home-n)"
+write_creds "$H" "umask 077" "cd /"
+# shellcheck disable=SC2016
+nout="$(env -i PATH="/usr/bin:/bin" HOME="$H" bash -c 'umask 022; cd "$2"; . "$1"; echo "$(umask) $PWD"' _ "$TMP/loader-block.sh" "$TMP")"
+if [[ "$nout" == "0077 /" ]]; then
+  ok "n: umask and working directory set by the file are not restored"
+else
+  bad "n: out=[$nout]"
+fi
+
 if [[ -e "$TMP/forbidden.calls" ]]; then
   bad "ssh/scp stub was called: $(cat "$TMP/forbidden.calls")"
 fi
