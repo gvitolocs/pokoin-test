@@ -40,13 +40,13 @@ test.pokoin.com does **not** use pokoin.com’s CDN or Kubernetes. Board media l
 | Public URL | `https://test-media.pokoin.com` (`MEDIA_BASE` in `src/lib/media.js`) |
 | Key layout | Same as the old `cdn.pokoin.com` root (`/card-images/foo.jpg` → object key `foo.jpg`) |
 
-`media-manifest.json` lists every object key the app can request, with sizes and SHA-256 from nezopt/pi-home sources. Regenerate after adding board media:
+`media-manifest.json` lists every object key the app can request, with sizes and SHA-256 from the machine that holds the media objects and from pi-home. Regenerate after adding board media:
 
 ```bash
 node scripts/media-manifest.mjs
 ```
 
-Upload from nezopt (the script loads the Cloudflare credentials file `~/.config/pokoin/cloudflare.env` itself, where `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` come from, and needs `~/.bun/bin/wrangler`):
+Upload from the machine that holds the media objects (the script loads the Cloudflare credentials file `~/.config/pokoin/cloudflare.env` itself, where `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` come from; its values replace values already exported; it needs `~/.bun/bin/wrangler`):
 
 ```bash
 ./scripts/upload-media-r2.sh
