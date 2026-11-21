@@ -16,7 +16,8 @@
 #     is not asked for. The tree names neither of them for a run that was not told.
 # A key the file or the manifest names twice is uploaded once: the list is deduped before the keys go
 # out, so what the run handed out and what it got reports about are the same set. The blanks in front
-# of a key come off before that, so a key and the same key with spaces in front of it are one key.
+# of a key come off before that, so a key and the same key with spaces in front of it are one key, and
+# a row left with nothing in it is dropped here too: it names nothing, and no worker takes a blank.
 # A key that is not one name under the object directory -- one of its components is "..", it starts
 # with "/", or it carries a control character -- is refused where it stands, never looked up, and
 # counted as a failed key. Two dots inside a name are part of that name and a key like any other.
@@ -131,8 +132,11 @@ fi
 # The blanks in front of a key come off before that, and before anything else uses the list: they are
 # not part of the name, and the workers take them off on their own, so two rows that differ only by
 # them are one key to the store and to the accounting.
+# What is left with nothing in it is no name, and no worker is handed a blank argument, so it goes with
+# the duplicates rather than joining the list as a key nobody can report a result for. A keys file
+# already drops its blank lines where it is read; a manifest row of spaces is what this pass catches.
 if (( ${#KEYS[@]} > 0 )); then
-  mapfile -t KEYS < <(printf '%s\n' "${KEYS[@]}" | awk '{ sub(/^[ \t]+/, ""); } !seen[$0]++')
+  mapfile -t KEYS < <(printf '%s\n' "${KEYS[@]}" | awk '{ sub(/^[ \t]+/, ""); } $0 != "" && !seen[$0]++')
 fi
 
 echo "Keys to process: ${#KEYS[@]}"
