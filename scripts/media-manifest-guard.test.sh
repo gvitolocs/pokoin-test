@@ -550,6 +550,128 @@ else
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# g17 (round 2, item E). assertDirectory, imported and called for itself. The generator is never run, so
+#      the check that its object directory is a directory that is there lives in the guard module, where
+#      it can be asked what it does with a path. The upload script has held this rule for a run of its
+#      own; a store that is not a directory reads as an empty one, which is every key missing.
+# ---------------------------------------------------------------------------
+cat > "$TMP/assert-directory.mjs" <<'NODE'
+import { pathToFileURL } from 'node:url';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const [guardPath, root] = process.argv.slice(2);
+// the module may not reach the network nor a process on the way in, as before
+globalThis.fetch = () => {
+  throw new Error('the guard reached the network');
+};
+
+const mod = await import(pathToFileURL(guardPath).href);
+if (typeof mod.assertDirectory !== 'function') {
+  console.log(`FAIL: assertDirectory is ${typeof mod.assertDirectory}, not a function`);
+  process.exit(1);
+}
+const { assertDirectory } = mod;
+
+mkdirSync(join(root, 'store'));
+mkdirSync(join(root, 'store', 'figures'));
+writeFileSync(join(root, 'catalog.json'), '{}\n');
+symlinkSync(join(root, 'store'), join(root, 'link-to-store'));
+symlinkSync(join(root, 'nothing-there'), join(root, 'dangling-link'));
+
+const problems = [];
+const expectPass = (name, path) => {
+  try {
+    assertDirectory(path);
+    console.log(`ok: ${name} is taken for what it is`);
+  } catch (e) {
+    problems.push(`${name}: threw ${e instanceof Error ? e.message : String(e)}`);
+  }
+};
+const expectThrow = (name, path) => {
+  let thrown = null;
+  try {
+    assertDirectory(path);
+  } catch (e) {
+    thrown = e;
+  }
+  if (thrown === null) {
+    problems.push(`${name}: nothing was thrown, so the value would have been taken for a store`);
+  } else if (!(thrown instanceof Error)) {
+    problems.push(`${name}: threw a ${typeof thrown}, not an Error`);
+  } else {
+    console.log(`ok: ${name} is refused (${thrown.message})`);
+  }
+};
+
+expectPass('a directory', join(root, 'store'));
+expectPass('a directory with something under it', join(root, 'store', 'figures'));
+// the upload script asks [[ -d ]], which follows a link, so a link to a directory has to be taken the
+// same way here: the two scripts are one rule, not two rules that disagree
+expectPass('a link that stands for a directory', join(root, 'link-to-store'));
+expectThrow('a path that is not there', join(root, 'no-such-store'));
+expectThrow('a link to nothing', join(root, 'dangling-link'));
+expectThrow('a regular file', join(root, 'catalog.json'));
+expectThrow('an empty value', '');
+
+if (problems.length) {
+  console.log(problems.map((p) => `FAIL: ${p}`).join('\n'));
+  process.exit(1);
+}
+console.log('all passed');
+NODE
+
+dir_rc=0
+dir_out="$(node "$TMP/assert-directory.mjs" "$GUARD" "$TMP" 2>&1)" || dir_rc=$?
+if [[ "$dir_rc" -eq 0 ]] && [[ "$dir_out" == *"all passed"* ]]; then
+  while IFS= read -r line; do
+    [[ "$line" == 'ok: '* ]] && ok "assertDirectory: ${line#ok: }"
+  done <<< "$dir_out"
+else
+  printf '%s\n' "$dir_out"
+  bad "assertDirectory: the module did not hold the contract (rc $dir_rc)"
+fi
+
+# g18 (round 2, item E). the generator calls that check, in the place the upload script has it: after the
+#      value is asked for and before a catalog is fetched, on stderr with an exit 2 and the one line the
+#      upload script prints.
+WANT_NOT_DIR_LINE="POKOIN_OBJECTS is not a directory"
+dir_import="$(grep -F "from './media-manifest-guard.mjs'" "$GEN" | grep -c 'assertDirectory' || true)"
+dir_unset="$(first_line "$GEN" "$WANT_DIR_LINE")"
+dir_call="$(first_line "$GEN" 'assertDirectory(')"
+dir_msg="$(first_line "$GEN" "$WANT_NOT_DIR_LINE")"
+dir_fetch="$(first_line "$GEN" 'fetch(')"
+dir_spawn="$(first_line "$GEN" "spawn('ssh'")"
+if [[ "$dir_import" != "1" ]]; then
+  bad "g18: the generator does not import assertDirectory from the guard module once (found $dir_import)"
+elif [[ "$dir_call" == "0" ]]; then
+  bad "g18: the generator never calls assertDirectory"
+elif [[ "$dir_unset" == "0" ]] || (( dir_call <= dir_unset )); then
+  bad "g18: the store is checked on line $dir_call, not after the run is asked for it on line $dir_unset"
+elif [[ "$dir_fetch" != "0" ]] && (( dir_call >= dir_fetch )); then
+  bad "g18: the store is checked on line $dir_call, not ahead of the first fetch on line $dir_fetch"
+elif [[ "$dir_spawn" != "0" ]] && (( dir_call >= dir_spawn )); then
+  bad "g18: the store is checked on line $dir_call, not ahead of the ssh call on line $dir_spawn"
+elif ! sed -n "${dir_call}p" "$GEN" | grep -qF -- 'LOCAL_OBJECTS'; then
+  bad "g18: the call does not name the value the store is held in: [$(sed -n "${dir_call}p" "$GEN")]"
+elif [[ "$dir_msg" == "0" ]]; then
+  bad "g18: the generator does not print [$WANT_NOT_DIR_LINE]"
+elif [[ "$(sed -n "${dir_msg}p" "$GEN")" != *'console.error'* ]]; then
+  bad "g18: the refusal does not go to stderr: [$(sed -n "${dir_msg}p" "$GEN")]"
+elif [[ "$(sed -n "$((dir_msg + 1))p" "$GEN")" != *'process.exit(2)'* ]]; then
+  bad "g18: the line after the refusal is not an exit 2: [$(sed -n "$((dir_msg + 1))p" "$GEN")]"
+elif (( dir_msg <= dir_call )); then
+  bad "g18: the refusal on line $dir_msg does not follow the check on line $dir_call"
+else
+  ok "g18: the generator checks its store is a directory, after the unset check and before a fetch, with exit 2"
+fi
+if holds "$UPLOAD" "$WANT_NOT_DIR_LINE"; then
+  ok "g18: the generator and the upload script print the same line for a store that is no directory"
+else
+  bad "g18: the upload script does not print [$WANT_NOT_DIR_LINE]"
+fi
+
 if [[ "$fail" -ne 0 ]]; then
   echo "FAILED"
   exit 1
