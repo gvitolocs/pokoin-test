@@ -291,8 +291,12 @@ if [[ "$FORCE" == "1" ]]; then
     || REWRITE_STATUS=$?
 fi
 
-# the manifest is the record of what the generator found on neither store: a row with no object and
-# no alias is a key this run cannot be expected to upload, so it is counted apart. The three counts
+# the manifest is the record of what the generator found on neither store: a row with no object and no
+# source the run could look for is a key this run cannot be expected to upload, so it is counted apart.
+# The alias map names a source for a key of its own -- the child tries it for a null row too, whether or
+# not the row carries an aliasOf -- so a key it holds is not one this run gave up on before it looked.
+# A row with an aliasOf is left out of the list as before: its source is the key the alias points at,
+# and the child reports it as a skip when neither that file nor the remote has it. The three counts
 # go on stderr before the HEAD sample, so that a sample fetch which does not come back cannot hide
 # them. The rows are kept in one variable of this shell, not in a file: a child whose record could
 # not be written may have taken the private directory of the run with it, and the counts still have
@@ -300,8 +304,11 @@ fi
 # skip counts as a key the store is missing, which is said apart below and costs the run its 0.
 MANIFEST_ROWS_STATUS=0
 NULL_ROWS="$(node -e "
-const m = JSON.parse(require('fs').readFileSync('${MANIFEST}', 'utf8'));
-for (const e of m.entries) if (e.object === null && !e.aliasOf) console.log(e.key);
+const fs = require('fs');
+const m = JSON.parse(fs.readFileSync('${MANIFEST}', 'utf8'));
+let aliases = {};
+if (fs.existsSync('${ALIASES}')) aliases = JSON.parse(fs.readFileSync('${ALIASES}', 'utf8'));
+for (const e of m.entries) if (e.object === null && !e.aliasOf && !aliases[e.key]) console.log(e.key);
 ")" || MANIFEST_ROWS_STATUS=$?
 
 SKIPPED=0

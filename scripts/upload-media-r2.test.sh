@@ -750,6 +750,54 @@ else
   bad "s5: status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS err=[$ERR]"
 fi
 
+# s5b. a row with no object and no aliasOf, but a key that media-aliases.json names: the alias map is
+#      the record of a source the run is told to look for, so a run that finds neither the key nor its
+#      alias is a real skip and not a free line about the manifest.
+fb_keys null2.png
+fb_store
+fb_manifest null2.png - -
+FB_ALIASES='{"null2.png":"gone.png"}'
+run_fb s5b
+FB_ALIASES=''
+if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] \
+  && [[ "$ERR" == *"skip (no source or alias): null2.png (alias gone.png)"* ]] \
+  && [[ "$ERR" == *$'\n'"1 key skipped: no source"* ]] \
+  && [[ "$ERR" != *"no object in the manifest"* ]]; then
+  ok "s5b (item 7): a null row the alias map names, unresolvable: [1 key skipped: no source] and exit 3, no free no-object line"
+else
+  bad "s5b: status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s5c. the same row with nothing in the alias map: it stays what it was, a key no run can upload, said
+#      apart and costing nothing
+fb_keys null2.png
+fb_store
+fb_manifest null2.png - -
+run_fb s5c
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] \
+  && [[ "$ERR" == *"1 key has no object in the manifest"* ]] \
+  && [[ "$ERR" != *"skipped: no source"* ]]; then
+  ok "s5c (item 7): a null row the alias map does not name is still counted apart and ends 0"
+else
+  bad "s5c: status=$STATUS wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s5d. and the same row with its alias on disk: it goes up under the key it was asked for, which is
+#      what it did before the count changed and still does
+fb_keys null2.png
+fb_store present.png
+fb_manifest null2.png - -
+FB_ALIASES='{"null2.png":"present.png"}'
+run_fb s5d
+FB_ALIASES=''
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/null2\.png' "$CALLS2" \
+  && [[ "$ERR" != *"no object in the manifest"* ]] && [[ "$ERR" != *"skip"* ]]; then
+  ok "s5d (item 7): a null row whose alias is on disk uploads under its own key and costs nothing"
+else
+  bad "s5d: status=$STATUS wrangler=$WR_CALLS calls=[$(cat "$CALLS2" 2>/dev/null)] err=[$ERR]"
+fi
+
 # s6. the keys the committed manifest records with no object are reported apart and cost nothing:
 #     the fixture is that manifest with only those rows, and its count is checked against the
 #     manifest's own counts.missing while the fixture is written
