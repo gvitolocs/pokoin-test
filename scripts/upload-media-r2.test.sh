@@ -1690,12 +1690,12 @@ FB_ALIASES=''
 SSH_MISS=''
 err_last="$(printf '%s\n' "$ERR" | tail -1)"
 if [[ "$STATUS" -eq 4 ]] && grep -Fq -- 'invalid key (skipped): ../x.png' "$TMP/err2" \
-  && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && [[ "$SSH_CALLS" -eq 2 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
   && grep -q 'pokoin-test-media/good1\.png' "$CALLS2" \
   && [[ "$err_last" == "$(line_for 1 'key failed to upload' 'keys failed to upload')" ]] \
   && [[ "$ERR" != *"skip (no source or alias)"* ]] && [[ "$ERR" != *"unaccounted"* ]] \
   && [[ "$(done_list)" == "good1.png" ]]; then
-  ok "s38 (item C): an alias target that is a path: refused, one ssh call for the key itself and none for the target, [$(line_for 1 'key failed to upload' 'keys failed to upload')] and exit 4"
+  ok "s38 (item C): an alias target that is a path: refused, the host asked once per requested key and never for the target, [$(line_for 1 'key failed to upload' 'keys failed to upload')] and exit 4"
 else
   bad "s38: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS last=[$err_last] done=[$(done_list)] calls=[$(tr '\n' '|' < "$CALLS2" 2>/dev/null)] err=[$ERR]"
 fi
@@ -1710,7 +1710,7 @@ SSH_MISS='.png'
 run_fb s38b POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
 FB_ALIASES=''
 SSH_MISS=''
-if [[ "$STATUS" -eq 4 ]] && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$SCP_CALLS" -eq 0 ]] \
+if [[ "$STATUS" -eq 4 ]] && [[ "$SSH_CALLS" -eq 2 ]] && [[ "$SCP_CALLS" -eq 0 ]] \
   && [[ "$WR_CALLS" -eq 1 ]] && grep -Fq -- 'invalid key (skipped): a/../b.png' "$TMP/err2" \
   && [[ "$(done_list)" == "good1.png" ]]; then
   ok "s38b (item C): a target with a parent step inside it is refused the same way, one step before any lookup"

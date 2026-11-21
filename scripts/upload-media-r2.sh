@@ -20,7 +20,9 @@
 # a row left with nothing in it is dropped here too: it names nothing, and no worker takes a blank.
 # A key that is not one name under the object directory -- one of its components is "..", it starts
 # with "/", or it carries a control character -- is refused where it stands, never looked up, and
-# counted as a failed key. Two dots inside a name are part of that name and a key like any other.
+# counted as a failed key. Two dots inside a name are part of that name and a key like any other. The
+# target an alias names is a key of the same kind and is refused before its path is built, with the
+# requested key standing as the failed one.
 set -euo pipefail
 
 # --- credentials loader: begin
@@ -231,6 +233,13 @@ upload_one() {
     alias="$(alias_for "$key")"
     if [[ -n "$alias" ]]; then
       source_key="$alias"
+      # the target of an alias is a key like any other, and a path is built out of it the same way, so
+      # it is refused by the same check and the requested key is the failed one: the record is what the
+      # run handed out, and a bad alias map is a bad record and not a missing object
+      if key_is_bad "$source_key"; then
+        record_result fail "$key"
+        return
+      fi
       if ! file="$(resolve_file "$source_key")"; then
         echo "skip (no source or alias): $key (alias $alias)" >&2
         record_result skip "$key"
