@@ -350,6 +350,9 @@ if [ "$1" = r2 ] && [ "$2" = object ] && [ "$3" = put ]; then
   put_key="${4#pokoin-test-media/}"
 fi
 if [ -n "$put_key" ] && [ -n "${UNRECORDABLE_KEY:-}" ] && [ "$put_key" = "$UNRECORDABLE_KEY" ]; then
+  # the three names a version of the script may keep its records under: RESULTS is the one file the
+  # present script uses, the two lists are what the script before the accounting used, and the ones
+  # that are unset are skipped
   for p in "${RESULTS:-}" "${FAIL_LIST:-}" "${SKIP_LIST:-}"; do
     [ -n "$p" ] || continue
     d=${p%/*}
