@@ -264,8 +264,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# s1…s6: the fallback host and the keys with no source. These cases need ssh and scp to answer, so
-# they run with a second stub directory that records every call instead of the forbidden one above.
+# s1..s12: the fallback host, the keys with no source and what the manifest says about them. These
+# cases need ssh and scp to answer, so they run with a second stub directory that records every call
+# instead of the forbidden one above.
 # ---------------------------------------------------------------------------
 S2="$TMP/stubs-fallback"
 mkdir -p "$S2" "$TMP/objects2" "$TMP/home-fb"
@@ -275,7 +276,10 @@ CALLS2="$TMP/wrangler2.calls"
 FB_KEYS="$TMP/keys2.txt"
 FB_HOST="fallback.example.invalid"   # a dummy, and not a name that resolves
 REMOTE_OBJECTS="/srv/pokoin/card-images/objects"   # PI_OBJECTS in the script under test
+FB_ALIASES_DEFAULT='{}'
 
+# the fixture manifest and aliases are read by the script with a real node, so a row that says
+# "object": null is honoured; only the HEAD sample program is refused, because it would fetch
 cat > "$S2/ssh" <<'STUB'
 #!/bin/sh
 # one block per call, one argument per line, so a command line can be compared exactly
@@ -286,9 +290,16 @@ for a in "$@"; do printf '%s\n' "$a" >> "$log"; done
 exit 0
 STUB
 cp "$S2/ssh" "$S2/scp"
-# alias_for prints the answer it is given, so the alias lookup works without a real node
 # shellcheck disable=SC2016
-printf '#!/bin/sh\n[ -n "${STUB_ALIAS:-}" ] && printf "%%s" "$STUB_ALIAS"\nexit 0\n' > "$S2/node"
+cat > "$S2/node" <<'STUB'
+#!/bin/sh
+if [ "$1" = "-e" ]; then
+  case "$2" in
+    *"method: 'HEAD'"*) exit 0 ;;
+  esac
+fi
+exec "$REAL_NODE" "$@"
+STUB
 cat > "$S2/wrangler" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >> "$CALLS2"
@@ -296,7 +307,10 @@ exit 0
 STUB
 chmod +x "$S2"/*
 
-# fb_keys <key…> / fb_store <key…>: the key list and the object store of the next run
+# REAL_NODE is the node the stubs hand everything but the fetch to; the manifest fixtures need it
+REAL_NODE="$(command -v node || true)"
+
+# fb_keys <key>... / fb_store <key>...: the key list and the object store of the next run
 fb_keys() {
   : > "$FB_KEYS"
   local k
@@ -308,16 +322,46 @@ fb_store() {
   for k in "$@"; do printf x > "$TMP/objects2/$k"; done
 }
 
-# run_fb <name> [extra env assignments…]: like run_case, with the recording stubs; sets STATUS, ERR,
-# OUT and the number of ssh, scp and wrangler calls of the run
+# fb_manifest <key> <object or -> <aliasOf or -> ...: the rows of the fixture manifest, three
+# arguments per key. A dash in the object column records "object": null, as the generator does for a
+# key it found on neither store.
+fb_manifest() {
+  local file="$TMP/root/media-manifest.json" k obj alias_of sep=''
+  printf '{"entries":[' > "$file"
+  while [[ $# -gt 0 ]]; do
+    k="$1"; obj="$2"; alias_of="$3"; shift 3
+    printf '%s' "$sep" >> "$file"
+    sep=','
+    printf '{"key":"%s"' "$k" >> "$file"
+    if [[ "$obj" == "-" ]]; then
+      printf ',"object":null' >> "$file"
+    else
+      printf ',"object":"%s"' "$obj" >> "$file"
+    fi
+    if [[ "$alias_of" != "-" ]]; then
+      printf ',"aliasOf":"%s"' "$alias_of" >> "$file"
+    fi
+    printf '}' >> "$file"
+  done
+  printf ']}\n' >> "$file"
+}
+
+# line_for <n> <singular> <plural>: the summary line of the script for n keys
+line_for() {
+  if [[ "$1" == "1" ]]; then printf '%s %s\n' "$1" "$2"; else printf '%s %s\n' "$1" "$3"; fi
+}
+
+# run_fb <name> [extra env assignments...]: like run_case, with the recording stubs; sets STATUS,
+# ERR, OUT and the number of ssh, scp and wrangler calls of the run
 run_fb() {
   shift
   rm -f "$SSH_LOG" "$SCP_LOG" "$CALLS2" "$TMP/root/.media-upload.done"
+  printf '%s\n' "${FB_ALIASES:-$FB_ALIASES_DEFAULT}" > "$TMP/root/media-aliases.json"
   set +e
   env -i PATH="$S2:/usr/bin:/bin" HOME="$TMP/home-fb" TMPDIR="$TMP/scratch" \
     CLOUDFLARE_API_TOKEN="$DUMMY_TOKEN" CLOUDFLARE_ACCOUNT_ID="$DUMMY_ACCOUNT" \
     WRANGLER="$S2/wrangler" POKOIN_OBJECTS="$TMP/objects2" KEYS_FILE="$FB_KEYS" \
-    SSH_LOG="$SSH_LOG" SCP_LOG="$SCP_LOG" CALLS2="$CALLS2" \
+    SSH_LOG="$SSH_LOG" SCP_LOG="$SCP_LOG" CALLS2="$CALLS2" REAL_NODE="$REAL_NODE" \
     "$@" bash "$TMP/root/scripts/upload-media-r2.sh" >"$TMP/out2" 2>"$TMP/err2"
   STATUS=$?
   set -e
@@ -331,14 +375,24 @@ run_fb() {
   if [[ -e "$CALLS2" ]]; then WR_CALLS="$(grep -c . "$CALLS2")"; fi
 }
 
-# s1. no fallback host: nothing is asked of ssh, the key is skipped, the run says so and exits 3
+# the manifest and alias fixtures are read by a real node, so without one these cases prove nothing
+if [[ -z "$REAL_NODE" ]]; then
+  echo "FAIL: no node on PATH, the fallback-host and manifest cases cannot run"
+  echo "FAILED"
+  exit 1
+fi
+
+# s1. no fallback host and a key the manifest gives an object: ssh is asked nothing, the run says so
+#     once, on stderr, after the summary, and exits 3
 fb_keys b.png
 fb_store
+fb_manifest b.png "/store/b.png" -
 run_fb s1
 if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] \
   && [[ "$WR_CALLS" -eq 0 ]] \
   && [[ "$ERR" == *"skip (no source): b.png"* ]] \
-  && [[ "$ERR" == *$'\n'"1 keys skipped: no source"* ]] \
+  && [[ "$ERR" == *$'\n'"$(line_for 1 'key skipped: no source' 'keys skipped: no source')"* ]] \
+  && [[ "$ERR" != *"no object in the manifest"* ]] \
   && [[ "$OUT" == *"Done. Uploaded keys recorded in"* ]]; then
   ok "s1 (a): host unset: no ssh or scp call, key skipped, count line on stderr after the summary, exit 3"
 else
@@ -348,6 +402,7 @@ fi
 # s2. fallback host set: ssh is asked exactly this command line, and the key it confirms is uploaded
 fb_keys b.png
 fb_store
+fb_manifest b.png "/store/b.png" -
 run_fb s2 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST"
 want_ssh="$(cat <<EXPECT
 ---
@@ -371,7 +426,7 @@ if [[ "$SSH_CALLS" -eq 1 ]] && [[ "$got_ssh" == "$want_ssh" ]] \
   && [[ "${scp_line[3]}" == "$FB_HOST:$REMOTE_OBJECTS/b.png" ]] \
   && [[ "${scp_line[4]}" == "$TMP/scratch/b.png."* ]] \
   && [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] && [[ "$(cat "$CALLS2")" == "$want_wr" ]] \
-  && [[ "$ERR" != *"keys skipped"* ]] \
+  && [[ "$ERR" != *"skipped: no source"* ]] && [[ "$ERR" != *"no object in the manifest"* ]] \
   && [[ ! -e "${scp_line[4]}" ]] && [[ "$(cat "$TMP/root/.media-upload.done")" == "b.png" ]]; then
   ok "s2 (b): host set: ssh got its options then --, the host and the test; the fetched key uploaded, exit 0"
 else
@@ -381,6 +436,7 @@ fi
 # s3. a value that is not a plain host token is refused before any ssh or scp call; empty is unset
 fb_keys b.png
 fb_store
+fb_manifest b.png "/store/b.png" -
 for bad_value in '-oProxyCommand=x' 'a b' 'x;id'; do
   run_fb s3 POKOIN_MEDIA_FALLBACK_HOST="$bad_value"
   if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
@@ -401,45 +457,129 @@ fi
 # s4. one key resolvable and one not: the resolvable one is still uploaded, the run exits 3
 fb_keys a.png b.png
 fb_store a.png
+fb_manifest a.png "/store/a.png" - b.png "/store/b.png" -
 run_fb s4
 if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
   && grep -q 'pokoin-test-media/a\.png' "$CALLS2" \
   && [[ "$ERR" == *"skip (no source): b.png"* ]] && [[ "$ERR" != *"skip (no source): a.png"* ]] \
-  && [[ "$ERR" == *$'\n'"1 keys skipped: no source"* ]] \
+  && [[ "$ERR" == *$'\n'"1 key skipped: no source"* ]] \
   && [[ "$(cat "$TMP/root/.media-upload.done")" == "a.png" ]]; then
   ok "s4 (d): a mixed list: the key with a source uploaded, the one without counted, exit 3"
 else
   bad "s4: status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS calls=[$(cat "$CALLS2" 2>/dev/null)] err=[$ERR]"
 fi
 
-# s5. a key whose alias has no source either is counted too (the other skip message)
+# s5. a key the manifest records with no object but with an alias is a real skip, not a free one
 fb_keys c.png
 fb_store
-run_fb s5 STUB_ALIAS=gone.png
+fb_manifest c.png - gone.png
+FB_ALIASES='{"c.png":"gone.png"}'
+run_fb s5
+FB_ALIASES=''
 if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] \
   && [[ "$ERR" == *"skip (no source or alias): c.png (alias gone.png)"* ]] \
-  && [[ "$ERR" == *$'\n'"1 keys skipped: no source"* ]]; then
-  ok "s5: the alias that resolves to nothing is counted by the same line and the same exit 3"
+  && [[ "$ERR" == *$'\n'"1 key skipped: no source"* ]] \
+  && [[ "$ERR" != *"no object in the manifest"* ]]; then
+  ok "s5: an alias whose source is missing too is counted as skipped: no source, and exits 3"
 else
   bad "s5: status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS err=[$ERR]"
 fi
 
-# s6. the credentials loader block is delimited by exactly one begin and one end marker line
+# s6. the keys the committed manifest records with no object are reported apart and cost nothing:
+#     the fixture is that manifest with only those rows, and its count is checked against the
+#     manifest's own counts.missing while the fixture is written
+committed_manifest="$(cd "$HERE/.." && pwd)/media-manifest.json"
+null_n="$(node -e '
+const fs = require("fs");
+const [from, manifestTo, keysTo] = process.argv.slice(1);
+const m = JSON.parse(fs.readFileSync(from, "utf8"));
+const rows = m.entries.filter((e) => e.object === null);
+if (rows.length !== m.counts.missing) {
+  console.error("rows with no object: " + rows.length + " != counts.missing: " + m.counts.missing);
+  process.exit(1);
+}
+fs.writeFileSync(manifestTo, JSON.stringify({ entries: rows }) + "\n");
+fs.writeFileSync(keysTo, rows.map((e) => e.key).join("\n") + "\n");
+process.stdout.write(String(rows.length));
+' "$committed_manifest" "$TMP/root/media-manifest.json" "$FB_KEYS" 2>"$TMP/err3")" || null_n=""
+if [[ ! "$null_n" =~ ^[0-9]+$ ]] || (( null_n < 1 )); then
+  bad "s6: no count of the committed manifest rows with no object: [$null_n] $(cat "$TMP/err3")"
+else
+  fb_store
+  run_fb s6
+  want_noobject="$(line_for "$null_n" 'key has no object in the manifest' 'keys have no object in the manifest')"
+  skip_lines="$(grep -c '^skip (no source): ' "$TMP/err2" || true)"
+  if [[ "$STATUS" -eq 0 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]] \
+    && [[ "$ERR" == "$want_noobject" || "$ERR" == *$'\n'"$want_noobject" ]] \
+    && [[ "$ERR" != *"skipped: no source"* ]] && [[ "$skip_lines" -eq "$null_n" ]]; then
+    ok "s6: the $null_n keys the committed manifest records with no object print [$want_noobject], no skipped line, exit 0"
+  else
+    bad "s6: n=$null_n skip_lines=$skip_lines status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS err=[$ERR]"
+  fi
+fi
+
+# s7. one key the manifest gives an object, absent on disk: exit 3 and the singular skip line
+fb_keys d.png
+fb_store
+fb_manifest d.png "/store/d.png" -
+run_fb s7
+last_err="$(printf '%s\n' "$ERR" | tail -1)"
+if [[ "$STATUS" -eq 3 ]] && [[ "$last_err" == "1 key skipped: no source" ]] \
+  && [[ "$ERR" != *"no object in the manifest"* ]] && [[ "$WR_CALLS" -eq 0 ]]; then
+  ok "s7: a key the manifest gives an object, not found: the last line is [1 key skipped: no source], exit 3"
+else
+  bad "s7: status=$STATUS last=[$last_err] wrangler=$WR_CALLS err=[$ERR]"
+fi
+
+# s8. three keys, one of each kind: the source is uploaded, the null row is reported apart, the
+#     absent object is the reason the run exits 3
+fb_keys present.png absent.png nothing.png
+fb_store present.png
+fb_manifest present.png "/store/present.png" - absent.png "/store/absent.png" - nothing.png - -
+run_fb s8
+err_tail="$(printf '%s\n' "$ERR" | tail -2 | tr '\n' '|')"
+if [[ "$STATUS" -eq 3 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/present\.png' "$CALLS2" \
+  && [[ "$err_tail" == "1 key has no object in the manifest|1 key skipped: no source|" ]] \
+  && [[ "$ERR" == *"skip (no source): nothing.png"* ]] \
+  && [[ "$(cat "$TMP/root/.media-upload.done")" == "present.png" ]]; then
+  ok "s8: mixed: uploaded the present one, both lines singular and in order, exit 3 for the absent object"
+else
+  bad "s8: status=$STATUS wrangler=$WR_CALLS tail=[$err_tail] calls=[$(cat "$CALLS2" 2>/dev/null)] err=[$ERR]"
+fi
+
+# s9. a key whose alias names an object that is on disk is uploaded under the requested key
+fb_keys alias2.png
+fb_store present.png
+fb_manifest alias2.png - present.png
+FB_ALIASES='{"alias2.png":"present.png"}'
+run_fb s9
+FB_ALIASES=''
+if [[ "$STATUS" -eq 0 ]] && [[ "$WR_CALLS" -eq 1 ]] \
+  && grep -q 'pokoin-test-media/alias2\.png --file '"$TMP"'/objects2/present\.png' "$CALLS2" \
+  && [[ "$ERR" == *"uploaded alias2.png (from alias present.png)"* ]] \
+  && [[ "$ERR" != *"skip"* ]]; then
+  ok "s9: the alias is read from media-aliases.json in the upload child and uploaded under the key"
+else
+  bad "s9: status=$STATUS wrangler=$WR_CALLS calls=[$(cat "$CALLS2" 2>/dev/null)] err=[$ERR]"
+fi
+
+# s11. the credentials loader block is delimited by exactly one begin and one end marker line
 begin_n="$(awk '/^# --- credentials loader: begin$/{n++} END{print n+0}' "$SRC")"
 end_n="$(awk '/^# --- credentials loader: end$/{n++} END{print n+0}' "$SRC")"
 if [[ "$begin_n" == "1" && "$end_n" == "1" ]]; then
-  ok "s6 (e): exactly one loader begin marker and one loader end marker"
+  ok "s11 (e): exactly one loader begin marker and one loader end marker"
 else
-  bad "s6: begin markers=$begin_n end markers=$end_n"
+  bad "s11: begin markers=$begin_n end markers=$end_n"
 fi
 
-# s7. the repository-wide check runs as a step of this suite, so its failure fails the suite
+# s12. the repository-wide check runs as a step of this suite, so its failure fails the suite
 hfail=0
 hout="$(bash "$HERE/no-host-names.test.sh" 2>&1)" || hfail=1
 if [[ "$hfail" -eq 0 ]] && [[ "$hout" == *"all passed"* ]]; then
-  ok "s7: scripts/no-host-names.test.sh passes and is a step of this suite"
+  ok "s12: scripts/no-host-names.test.sh passes and is a step of this suite"
 else
-  bad "s7: scripts/no-host-names.test.sh failed (rc=$hfail): $(printf '%s\n' "$hout" | grep -v '^ok: ' | head -5)"
+  bad "s12: scripts/no-host-names.test.sh failed (rc=$hfail): $(printf '%s\n' "$hout" | grep -v '^ok: ' | head -5)"
 fi
 
 if [[ -e "$TMP/forbidden.calls" ]]; then
