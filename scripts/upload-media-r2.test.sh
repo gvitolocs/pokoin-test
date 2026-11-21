@@ -1718,6 +1718,158 @@ else
   bad "s38b: status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS done=[$(done_list)] err=[$ERR]"
 fi
 
+# s39 (item D). the remote test is one command line, and the shell that reads it is on the other
+#               machine: a key with a space in it is two words there, a quote in it closes the command
+#               and everything after it is whatever the key says, and a star is a list of files. The path
+#               goes over as one quoted word -- not with bash's own quoting, because the shell behind ssh
+#               is the login shell of a machine this run knows nothing about.
+# The words are spelled here, not recomputed, so a case cannot pass by agreeing with the same
+# construction twice. A name holding a single quote is not in the table: xargs reads the quotes of its own
+# input before the key reaches a child, so such a key never arrives to be quoted at all (s39b builds the
+# word itself). The rows are pairs of lines -- a key, then the one line the host has to be handed for it --
+# because a key may hold any delimiter a table would use.
+while read -r d1_key; do
+  read -r d1_want
+  fb_keys "$d1_key"
+  fb_store
+  fb_manifest "$d1_key" "/store/$d1_key" -
+  run_fb s39 POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$REMOTE_OBJECTS"
+  d1_got="$(tail -1 "$SSH_LOG" 2>/dev/null || printf '(no call)')"
+  if [[ "$SSH_CALLS" -eq 1 ]] && [[ "$d1_got" == "$d1_want" ]] && [[ "$STATUS" -eq 0 ]] \
+    && [[ "$WR_CALLS" -eq 1 ]]; then
+    ok "s39 (item D): the key [$d1_key] reaches the host as the one word [$d1_got]"
+  else
+    bad "s39: key=[$d1_key] status=$STATUS ssh=$SSH_CALLS wrangler=$WR_CALLS got=[$d1_got] want=[$d1_want] err=[$ERR]"
+  fi
+done <<'D1CASES'
+my card.png
+test -f '/remote/objects/my card.png'
+a*b.png
+test -f '/remote/objects/a*b.png'
+a$(x).png
+test -f '/remote/objects/a$(x).png'
+a;b.png
+test -f '/remote/objects/a;b.png'
+a|b.png
+test -f '/remote/objects/a|b.png'
+a`x`.png
+test -f '/remote/objects/a`x`.png'
+a[b].png
+test -f '/remote/objects/a[b].png'
+D1CASES
+
+# s39b (item D). the helper on its own, extracted from the script, for the name xargs cannot hand over:
+#                the quote a key holds has to leave a word that the far shell reads as that one name.
+awk '/^remote_word\(\) \{/,/^\}$/' "$SRC" > "$TMP/remote_word.sh"
+if [[ ! -s "$TMP/remote_word.sh" ]]; then
+  bad "s39b: no remote_word function was found in $SRC to extract"
+else
+  cat > "$TMP/word-cases.bash" <<'HARNESS'
+#!/usr/bin/env bash
+set +e
+# shellcheck disable=SC1090
+source "$1"
+problems=0
+word_case() {
+  local name="$1" want="$2" path="$3" got
+  got="$(remote_word "$path")"
+  if [[ "$got" != "$want" ]]; then
+    echo "FAIL: $name: word [$got], expected [$want]"
+    problems=$((problems + 1))
+    return
+  fi
+  # the word is read back by a plain shell: what comes out has to be the path, exactly once
+  local -a read_back=()
+  mapfile -t read_back < <(eval "set -- $got; printf '%s\n' \"\$@\"")
+  if [[ "${#read_back[@]}" -ne 1 || "${read_back[0]}" != "$path" ]]; then
+    echo "FAIL: $name: a shell reads it as ${#read_back[@]} word(s) [${read_back[*]}], expected the path alone"
+    problems=$((problems + 1))
+    return
+  fi
+  echo "ok: $name"
+}
+word_case 'a name with a blank in it' "'/remote/objects/my card.png'" '/remote/objects/my card.png'
+word_case 'a name with a quote in it' "'/remote/objects/it'\\''s.png'" "/remote/objects/it's.png"
+word_case 'a name with a star in it' "'/remote/objects/a*b.png'" '/remote/objects/a*b.png'
+word_case 'a name with a substitution in it' "'/remote/objects/a\$(x).png'" '/remote/objects/a$(x).png'
+word_case 'a name with two quotes in it' "'/remote/objects/a'\\''b'\\''c.png'" "/remote/objects/a'b'c.png"
+[[ "$problems" -eq 0 ]] && echo 'all passed'
+exit "$problems"
+HARNESS
+  wfail=0
+  wout="$(bash "$TMP/word-cases.bash" "$TMP/remote_word.sh" 2>&1)" || wfail=1
+  if [[ "$wfail" -eq 0 ]] && [[ "$wout" == *"all passed"* ]]; then
+    while IFS= read -r line; do
+      [[ "$line" == 'ok: '* ]] && ok "remote word: ${line#ok: }"
+    done <<< "$wout"
+  else
+    printf '%s\n' "$wout"
+    bad "s39b: the extracted remote-word helper did not hold the contract (rc=$wfail)"
+  fi
+fi
+
+# s3o (item D). the remote directory is validated where the host is: it has to be an absolute path of
+#              plain characters, no parent step in it and nothing after its name, because it is put in
+#              front of every key the run asks the host for.
+want_invalid_objects_line="invalid POKOIN_MEDIA_FALLBACK_OBJECTS"
+for bad_dir in '/remote obj' "/remote/obj's" '/remote/$(x)' '/remote/`x`' '/remote/*' '/remote/a?b' \
+  '/remote/;id' '/remote/a|b' '/remote/../objects' '/remote/objects/..' '..' 'remote/objects' \
+  '/remote/objects ' '/remote/objects/a b'; do
+  run_fb s3o POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$bad_dir"
+  if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
+    && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$SCP_CALLS" -eq 0 ]] && [[ "$WR_CALLS" -eq 0 ]]; then
+    ok "s3o (item D): remote directory [$bad_dir]: exit 2, only [$want_invalid_objects_line], no ssh, scp or wrangler call"
+  else
+    bad "s3o: value=[$bad_dir] status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS wrangler=$WR_CALLS err=[$ERR]"
+  fi
+done
+
+# s3p (item D). the shapes that are a directory of plain characters go through and are used as given
+for good_dir in '/remote/objects' '/remote/obj-1' '/remote/obj_2' '/remote/a@b' '/remote/c+d' '/remote/v1.2'; do
+  fb_keys b.png
+  fb_store
+  fb_manifest b.png "/store/b.png" -
+  run_fb s3p POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS="$good_dir"
+  if [[ "$STATUS" -eq 0 ]] && [[ "$SSH_CALLS" -eq 1 ]] && [[ "$SCP_CALLS" -eq 1 ]] \
+    && [[ "$ERR" != *"$want_invalid_objects_line"* ]] && grep -Fq -- "$good_dir/b.png" "$SSH_LOG"; then
+    ok "s3p (item D): the remote directory [$good_dir] is accepted, and the key is asked for under it"
+  else
+    bad "s3p: value=[$good_dir] status=$STATUS ssh=$SSH_CALLS scp=$SCP_CALLS log=[$(tr '\n' '|' < "$SSH_LOG" 2>/dev/null)] err=[$ERR]"
+  fi
+done
+
+# s3q (item D). a value that cannot be a directory is a typo whatever the host says, so it is refused
+#              with no host set too; an empty one stays the unset it always was (s3g)
+run_fb s3q POKOIN_MEDIA_FALLBACK_HOST= POKOIN_MEDIA_FALLBACK_OBJECTS='/remote/*'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
+  && [[ "$SSH_CALLS" -eq 0 ]]; then
+  ok "s3q (item D): with no host set an unusable remote directory is still refused, and an empty one is not (s3g)"
+else
+  bad "s3q: status=$STATUS ssh=$SSH_CALLS err=[$ERR]"
+fi
+
+# s0j/s0k (item D). the order: the host first, then its directory being asked for, then its shape, then
+#              the local store. Each run below is missing more than one thing and names the first.
+run_objects s0j "" POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS='/remote/*'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_invalid_objects_line" ]] \
+  && [[ "$ERR" != *"$want_objects_line"* ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0j: the shape of the remote directory is refused before the local store is asked for"
+else
+  bad "s0j: status=$STATUS err=[$ERR]"
+fi
+run_objects s0k "" POKOIN_MEDIA_FALLBACK_HOST='-oProxyCommand=x' POKOIN_MEDIA_FALLBACK_OBJECTS='/remote/*'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]]; then
+  ok "s0k: an unusable host is still the first thing refused, before the directory that belongs to it"
+else
+  bad "s0k: status=$STATUS err=[$ERR]"
+fi
+run_objects s0l "" POKOIN_MEDIA_FALLBACK_HOST="$FB_HOST" POKOIN_MEDIA_FALLBACK_OBJECTS=
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_fallback_objects_line" ]]; then
+  ok "s0l: a directory that is missing is asked for, not called invalid: the two lines stay apart"
+else
+  bad "s0l: status=$STATUS err=[$ERR] want=[$want_fallback_objects_line]"
+fi
+
 # s12. the repository-wide check runs as a step of this suite, so its failure fails the suite
 hfail=0
 hout="$(bash "$HERE/no-host-names.test.sh" 2>&1)" || hfail=1

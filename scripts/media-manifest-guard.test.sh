@@ -20,6 +20,9 @@ UPLOAD="${HERE}/upload-media-r2.sh"
 WANT_DIR_LINE="set POKOIN_OBJECTS to the directory that holds the media objects"
 WANT_REMOTE_LINE="set POKOIN_MEDIA_FALLBACK_OBJECTS to the remote directory that holds the media objects"
 WANT_HOST_LINE="refusing to write a manifest that names the fallback host"
+# the shape of a word wrapped in single quotes, which is how a path that holds anything a shell reads
+# has to go over to another machine
+WANT_QUOTE_WRAP="'%s'"
 
 fail=0
 ok() { echo "ok: $1"; }
@@ -488,6 +491,62 @@ if holds "$UPLOAD" "$WANT_REMOTE_LINE"; then
   ok "g13: the generator and the upload script print the same line for the same missing value"
 else
   bad "g13: the upload script does not print [$WANT_REMOTE_LINE]"
+fi
+
+# g14 (round 2, item D). the remote directory is validated where the host is, in both scripts, with the
+#      same line: it stands in front of every key the run asks the other machine for, so a value that is
+#      not a plain absolute path ends the run before anything is fetched or ssh is asked anything.
+WANT_INVALID_REMOTE_LINE="invalid POKOIN_MEDIA_FALLBACK_OBJECTS"
+remote_invalid="$(first_line "$GEN" "$WANT_INVALID_REMOTE_LINE")"
+gen_host_msg="$(first_line "$GEN" 'invalid POKOIN_MEDIA_FALLBACK_HOST')"
+gen_ssh="$(first_line "$GEN" "spawn('ssh'")"
+gen_fetch="$(first_line "$GEN" 'fetch(')"
+if [[ "$remote_invalid" == "0" ]]; then
+  bad "g14: the generator does not print [$WANT_INVALID_REMOTE_LINE]"
+elif (( remote_invalid <= gen_host_msg )); then
+  bad "g14: the generator refuses the remote directory ($remote_invalid) before it validates the host ($gen_host_msg)"
+elif [[ "$gen_ssh" != "0" ]] && (( remote_invalid >= gen_ssh )); then
+  bad "g14: the remote directory is checked on line $remote_invalid, not ahead of the ssh call ($gen_ssh)"
+elif [[ "$gen_fetch" != "0" ]] && (( remote_invalid >= gen_fetch )); then
+  bad "g14: the remote directory is checked on line $remote_invalid, not ahead of the first fetch ($gen_fetch)"
+elif [[ "$(sed -n "$((remote_invalid + 1))p" "$GEN")" != *'process.exit(2)'* ]]; then
+  bad "g14: the line after the refusal is not an exit 2: [$(sed -n "$((remote_invalid + 1))p" "$GEN")]"
+elif [[ "$(sed -n "${remote_invalid}p" "$GEN")" != *'console.error'* ]]; then
+  bad "g14: the refusal does not go to stderr: [$(sed -n "${remote_invalid}p" "$GEN")]"
+else
+  ok "g14: the generator refuses an unusable remote directory on stderr with exit 2, after its host, ahead of any fetch or ssh"
+fi
+if holds "$UPLOAD" "$WANT_INVALID_REMOTE_LINE"; then
+  ok "g14: the generator and the upload script print the same line for the same unusable value"
+else
+  bad "g14: the upload script does not print [$WANT_INVALID_REMOTE_LINE]"
+fi
+# one character class for both, spelled out: a letter, a digit, or one of . _ / @ + -. Nothing that
+# starts a second word, an expansion, a glob or a second remote command is in it.
+for class_file in "$GEN" "$UPLOAD"; do
+  if grep -q -F -- '[A-Za-z0-9._/@+-]' "$class_file"; then
+    ok "g14: $(basename "$class_file") holds the one remote-directory class, and no other"
+  else
+    bad "g14: $(basename "$class_file") does not hold the remote-directory class [A-Za-z0-9._/@+-]"
+  fi
+done
+
+# g16 (round 2, item D). the remote path of the upload script is quoted, in exactly the one place a
+#      remote command is built out of a key
+if ! holds "$UPLOAD" 'remote_word'; then
+  bad "g16: the upload script builds no quoted remote word at all"
+else
+  quote_use="$(first_line "$UPLOAD" 'test -f $(remote_word')"
+  quote_def="$(first_line "$UPLOAD" 'remote_word() {')"
+  if [[ "$quote_def" == "0" || "$quote_use" == "0" ]]; then
+    bad "g16: the quoting helper (def=$quote_def) is not used by the remote test (use=$quote_use)"
+  elif (( quote_def >= quote_use )); then
+    bad "g16: the remote test on line $quote_use runs ahead of the helper defined on line $quote_def"
+  elif ! sed -n "${quote_def},$((quote_def + 6))p" "$UPLOAD" | grep -qF -- "$WANT_QUOTE_WRAP"; then
+    bad "g16: the helper does not write a quote of the name as a quoted quote: [$(sed -n "${quote_def},$((quote_def + 6))p" "$UPLOAD" | tr '\n' '|')]"
+  else
+    ok "g16: the remote path is one quoted word, built by the helper the remote test calls"
+  fi
 fi
 
 if [[ "$fail" -ne 0 ]]; then
