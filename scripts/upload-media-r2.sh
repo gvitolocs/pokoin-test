@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Upload media-manifest.json objects to R2 from nezopt (local object store + pi-home fallback).
-# Loads ~/.config/pokoin/cloudflare.env itself (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID come from it); needs ~/.bun/bin/wrangler.
+# Sources ~/.config/pokoin/cloudflare.env when it is readable and LANE_WORKER is unset (its values replace exported ones); needs ~/.bun/bin/wrangler.
 # Do not run in CI without intent — this pushes to pokoin-test-media.
 #
 # Optional:
@@ -8,17 +8,19 @@
 #   FORCE=1          — re-upload even if the key is in .media-upload.done
 set -euo pipefail
 
-# Load the Cloudflare credentials file when the shell did not (skipped when LANE_WORKER is set).
+# Source the credentials file when it is readable and LANE_WORKER is unset; its values replace
+# already exported ones. All shell options are restored after the source.
 _cf_env="${HOME:-}/.config/pokoin/cloudflare.env"
 if [[ -z "${LANE_WORKER:-}" && -f "$_cf_env" && -r "$_cf_env" ]]; then
-  case $- in *a*) _cf_had_a=1 ;; *) _cf_had_a=0 ;; esac
-  case $- in *u*) _cf_had_u=1 ;; *) _cf_had_u=0 ;; esac
+  _cf_opts=$(set +o)
+  # the substitution does not report errexit, so it is added to the snapshot
+  case $- in *e*) _cf_opts="${_cf_opts}"$'\n'"set -o errexit" ;; esac
+  set +eu
   set -a
-  set +u
   # shellcheck disable=SC1090
   . "$_cf_env" >/dev/null 2>&1 || true
-  [[ "$_cf_had_u" == 1 ]] && set -u
-  [[ "$_cf_had_a" == 1 ]] || set +a
+  { eval "$_cf_opts"; } 2>/dev/null
+  unset _cf_opts
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -45,7 +47,12 @@ if [[ ! -x "$WRANGLER" ]]; then
 fi
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
-  echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set (looked in ${_cf_env})" >&2
+  if [[ -n "${LANE_WORKER:-}" ]]; then
+    _cf_where="credentials file not read because LANE_WORKER is set"
+  else
+    _cf_where="looked in ${_cf_env}"
+  fi
+  echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set (${_cf_where})" >&2
   exit 1
 fi
 
