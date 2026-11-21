@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Tests for scripts/upload-media-r2.sh: credential loading and preflight, the fallback host, the
-# keys skipped for want of a source, the upload whose wrangler call fails, the keys a run failed to
-# account for, the key that is listed twice and the one it cannot record in the done list; and
-# scripts/no-host-names.test.sh as one of its own steps.
+# Tests for scripts/upload-media-r2.sh: credential loading and preflight, the object directory it has
+# to be told about, the fallback host, the keys skipped for want of a source, the upload whose
+# wrangler call fails, the keys a run failed to account for, the key that is listed twice and the one
+# it cannot record in the done list; and scripts/no-host-names.test.sh as one of its own steps.
 # Runs a copy of the script under env -i with stub wrangler/node/ssh/scp and a temp HOME.
 # Usage: bash scripts/upload-media-r2.test.sh [path-to-script-under-test]
 set -euo pipefail
@@ -556,6 +556,70 @@ if [[ "$STATUS" -eq 3 ]] && [[ "$SSH_CALLS" -eq 0 ]] && [[ "$ERR" != *"invalid"*
   ok "s3 (c): an empty value means no fallback, not an invalid one"
 else
   bad "s3e: status=$STATUS ssh=$SSH_CALLS err=[$ERR]"
+fi
+
+# s0. the object directory has no default in the tree: with POKOIN_OBJECTS unset the run says which
+#     variable to set and ends 2 before it looks at anything else, and the fallback-host validation
+#     stays in front of it. These cases run with the recording stubs of the first section and a home
+#     that holds no credentials file: a run that got past the check would report the missing
+#     credentials instead, which is what makes the order visible.
+run_objects() {
+  shift; local dir="$1"; shift
+  local -a objs=()
+  if [[ -n "$dir" ]]; then objs=("POKOIN_OBJECTS=$dir"); fi
+  mkdir -p "$TMP/home-objects/.config/pokoin"
+  rm -f "$CALLS" "$TMP/root/.media-upload.done"
+  # the file the forbidden stubs write to belongs to the whole suite and is checked at its end, so
+  # this run measures it before and after instead of removing it
+  FORB_BEFORE=0
+  if [[ -e "$TMP/forbidden.calls" ]]; then FORB_BEFORE="$(wc -c < "$TMP/forbidden.calls")"; fi
+  set +e
+  env -i PATH="$TMP/stubs:/usr/bin:/bin" HOME="$TMP/home-objects" TMPDIR="$TMP/scratch" \
+    WRANGLER="$TMP/stubs/wrangler" KEYS_FILE="$TMP/keys.txt" \
+    "${objs[@]}" "$@" bash "$TMP/root/scripts/upload-media-r2.sh" >"$TMP/out" 2>"$TMP/err"
+  STATUS=$?
+  set -e
+  ERR="$(cat "$TMP/err")"
+  FORB_NOW="$FORB_BEFORE"
+  if [[ -e "$TMP/forbidden.calls" ]]; then FORB_NOW="$(wc -c < "$TMP/forbidden.calls")"; fi
+}
+want_objects_line="set POKOIN_OBJECTS to the directory that holds the media objects"
+
+# s0a. unset: only that line on stderr, exit 2, and neither wrangler nor ssh was reached
+run_objects s0a ""
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_objects_line" ]] \
+  && [[ ! -e "$CALLS" ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0a: POKOIN_OBJECTS unset: exit 2, only [$want_objects_line], no wrangler, ssh or scp call"
+else
+  bad "s0a: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none) forbidden=$((FORB_NOW - FORB_BEFORE))"
+fi
+
+# s0b. the same with an empty value: empty is unset, not a directory
+run_objects s0b "" POKOIN_OBJECTS=
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "$want_objects_line" ]] && [[ ! -e "$CALLS" ]] \
+  && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0b: POKOIN_OBJECTS empty: exit 2 with the same line"
+else
+  bad "s0b: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# s0c. an unusable fallback host and no object directory: the host is still validated first
+run_objects s0c "" POKOIN_MEDIA_FALLBACK_HOST='-oProxyCommand=x'
+if [[ "$STATUS" -eq 2 ]] && [[ "$ERR" == "invalid POKOIN_MEDIA_FALLBACK_HOST" ]] \
+  && [[ ! -e "$CALLS" ]] && [[ "$FORB_NOW" -eq "$FORB_BEFORE" ]]; then
+  ok "s0c: the fallback host is validated before the object directory is asked for"
+else
+  bad "s0c: status=$STATUS err=[$ERR] calls=$(cat "$CALLS" 2>/dev/null || echo none)"
+fi
+
+# s0d. set: the run goes on and reaches the credentials preflight it reached before the check existed
+run_objects s0d "$TMP/objects"
+want_creds_line="CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set (looked in $TMP/home-objects/.config/pokoin/cloudflare.env)"
+if [[ "$STATUS" -eq 1 ]] && [[ "$ERR" == "$want_creds_line" ]] \
+  && [[ "$ERR" != *"$want_objects_line"* ]]; then
+  ok "s0d: POKOIN_OBJECTS set: no complaint about it, the run goes on to the credentials preflight"
+else
+  bad "s0d: status=$STATUS err=[$ERR] want=[$want_creds_line]"
 fi
 
 # s4. one key resolvable and one not: the resolvable one is still uploaded, the run exits 3
