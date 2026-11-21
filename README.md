@@ -40,7 +40,7 @@ test.pokoin.com does **not** use pokoin.com’s CDN or Kubernetes. Board media l
 | Public URL | `https://test-media.pokoin.com` (`MEDIA_BASE` in `src/lib/media.js`) |
 | Key layout | Same as the old `cdn.pokoin.com` root (`/card-images/foo.jpg` → object key `foo.jpg`) |
 
-`media-manifest.json` lists every object key the app can request, with sizes and SHA-256 from the machine that holds the media objects and from pi-home. Regenerate after adding board media:
+`media-manifest.json` lists every object key the app can request, with sizes and SHA-256 from the machine that holds the media objects and, when a fallback host is configured, from that host too. Regenerate after adding board media:
 
 ```bash
 node scripts/media-manifest.mjs
@@ -51,6 +51,8 @@ Upload from the machine that holds the media objects (the script loads the Cloud
 ```bash
 ./scripts/upload-media-r2.sh
 ```
+
+Both media scripts take one optional variable, `POKOIN_MEDIA_FALLBACK_HOST`: the ssh host that holds media objects missing from the local store. Unset (the default) means no fallback — `scripts/media-manifest.mjs` then records such a key with no source, and `scripts/upload-media-r2.sh` reports it as having no source instead of fetching it.
 
 Do not commit `.media-upload.done`.
 

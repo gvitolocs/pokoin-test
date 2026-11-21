@@ -24,9 +24,9 @@ function loadAliases() {
   return JSON.parse(readFileSync(ALIASES_PATH, 'utf8'));
 }
 
-const NEZOPT_OBJECTS = '/home/nez/data/pokoin-leftovers/objects';
+const LOCAL_OBJECTS = '/home/nez/data/pokoin-leftovers/objects';
 const PI_OBJECTS = '/srv/pokoin/card-images/objects';
-const PI_HOST = 'pi-home';
+const PI_HOST = process.env.POKOIN_MEDIA_FALLBACK_HOST || '';
 const LEGACY_CATALOG = 'https://cdn.pokoin.com/poko-video/newpoko/catalog.json';
 
 async function fetchCatalog() {
@@ -54,7 +54,7 @@ async function sha256File(path) {
 }
 
 function piKeysPresent(keys) {
-  if (!keys.length) return Promise.resolve(new Set());
+  if (!PI_HOST || !keys.length) return Promise.resolve(new Set());
   const script = `cd ${PI_OBJECTS} && while IFS= read -r k; do test -f "$k" && printf '%s\\n' "$k"; done`;
   return new Promise((resolve) => {
     const child = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', PI_HOST, script], {
@@ -72,12 +72,12 @@ function piKeysPresent(keys) {
 }
 
 function resolveSource(key, piPresent) {
-  const local = join(NEZOPT_OBJECTS, key);
+  const local = join(LOCAL_OBJECTS, key);
   if (existsSync(local) && statSync(local).isFile()) {
-    return { path: local, source: 'nezopt' };
+    return { path: local, source: 'local' };
   }
   if (piPresent.has(key)) {
-    return { path: `ssh:${PI_HOST}:${PI_OBJECTS}/${key}`, source: 'pi-home' };
+    return { path: `ssh:${PI_HOST}:${PI_OBJECTS}/${key}`, source: 'fallback' };
   }
   return { path: '', source: '' };
 }
@@ -104,10 +104,10 @@ async function main() {
   const keyMap = collectMediaKeys({ catalog });
 
   const keys = [...keyMap.keys()].sort();
-  const localMissing = keys.filter((key) => !existsSync(join(NEZOPT_OBJECTS, key)));
-  console.log(`Resolving ${keys.length} keys (${localMissing.length} need pi-home check)…`);
+  const localMissing = keys.filter((key) => !existsSync(join(LOCAL_OBJECTS, key)));
+  console.log(`Resolving ${keys.length} keys (${localMissing.length} need a fallback-host check)…`);
   const piPresent = await piKeysPresent(localMissing);
-  console.log(`Hashing (nezopt files only)…`);
+  console.log(`Hashing (local files only)…`);
 
   const CONCURRENCY = 12;
   const entries = new Array(keys.length);
@@ -176,7 +176,7 @@ async function main() {
 
   const mb = (totalBytes / (1024 * 1024)).toFixed(2);
   console.log(`Wrote ${OUT}`);
-  console.log(`Keys: ${keys.length} · ${mb} MB (nezopt hashes) · missing source: ${missing.length}`);
+  console.log(`Keys: ${keys.length} · ${mb} MB (local hashes) · missing source: ${missing.length}`);
   console.log('By folder (count):', manifest.byFolder);
   if (missing.length) {
     console.log('Missing (first 20):', missing.slice(0, 20).join('\n  '));
